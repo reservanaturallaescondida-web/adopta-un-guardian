@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video 1 · ¿Y si tu dinero pudiera respirar? · La Escondida</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:linear-gradient(160deg,#1a3a2a 0%,#0d2a1c 55%,#050f0a 100%);
+  font-family:'Georgia',serif;color:#f8f4e8;height:100vh;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;position:relative;}
+canvas{position:absolute;inset:0;width:100%;height:100%;}
+.wrap{position:relative;z-index:2;max-width:640px;padding:40px;text-align:center;}
+.badge{display:inline-block;background:rgba(82,183,136,.12);border:1px solid rgba(82,183,136,.3);
+  color:#95d5b2;padding:6px 16px;border-radius:50px;font-size:.7rem;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;margin-bottom:24px;opacity:0;
+  animation:fadeIn 1s ease .3s forwards;font-family:sans-serif;}
+h1{font-size:clamp(1.8rem,5vw,3rem);line-height:1.2;margin-bottom:18px;opacity:0;
+  animation:fadeIn 1.2s ease 1s forwards;}
+p{font-size:1rem;color:rgba(248,244,232,.65);line-height:1.7;margin-bottom:36px;
+  font-family:sans-serif;font-weight:300;opacity:0;animation:fadeIn 1.2s ease 2s forwards;}
+.stats{display:flex;gap:32px;justify-content:center;margin-bottom:40px;opacity:0;
+  animation:fadeIn 1.2s ease 3s forwards;}
+.stat .num{font-family:'Space Mono',monospace;font-size:1.6rem;font-weight:700;color:#d4a843;}
+.stat .lbl{font-size:.65rem;color:rgba(255,255,255,.4);text-transform:uppercase;
+  letter-spacing:.08em;margin-top:4px;font-family:sans-serif;}
+.back{opacity:0;animation:fadeIn 1s ease 4s forwards;}
+.back a{display:inline-block;background:linear-gradient(135deg,#2d6a4f,#52b788);color:white;
+  padding:12px 28px;border-radius:50px;text-decoration:none;font-family:sans-serif;
+  font-size:.85rem;font-weight:700;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+.tag{position:fixed;bottom:18px;right:22px;font-size:.62rem;color:rgba(255,255,255,.2);
+  font-family:sans-serif;letter-spacing:.1em;}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+  <span class="badge">🌱 Expectativa · Video 1 de 3</span>
+  <h1>¿Y si tu dinero<br>pudiera respirar?</h1>
+  <p>Amanecer en La Escondida. La pregunta que transforma<br>inversores en guardianes del bosque.</p>
+  <div class="stats">
+    <div class="stat"><div class="num">33.5%</div><div class="lbl">ROI en 5 meses</div></div>
+    <div class="stat"><div class="num">3 🌳</div><div class="lbl">árboles plantados</div></div>
+    <div class="stat"><div class="num">$314K</div><div class="lbl">ganancia neta</div></div>
+  </div>
+  <div class="back"><a href="index.html#adoptar">🐷 Adopta Tu Guardián →</a></div>
+</div>
+<div class="tag">LA ESCONDIDA · REEL 01</div>
+<script>
+const cvs = document.getElementById('bg');
+const ctx = cvs.getContext('2d');
+function resize(){ cvs.width = innerWidth; cvs.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+const particles = Array.from({length:46}, ()=>({
+  x: Math.random()*innerWidth, y: Math.random()*innerHeight,
+  r: Math.random()*2+.5, vy:-Math.random()*.4-.1, vx:(Math.random()-.5)*.3,
+  a: Math.random()*.4+.1
+}));
+(function frame(){
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  particles.forEach(p=>{
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.y<-10) p.y = cvs.height+10;
+    if(p.x<-10) p.x = cvs.width+10;
+    if(p.x>cvs.width+10) p.x = -10;
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = '#95d5b2';
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

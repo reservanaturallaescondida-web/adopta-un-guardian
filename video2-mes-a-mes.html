@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video 2 · Mes a mes: el guardián crece y tú cobras · La Escondida</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:linear-gradient(160deg,#071a0f 0%,#0a2215 50%,#1f4030 100%);
+  font-family:'Georgia',serif;color:#f8f4e8;min-height:100vh;overflow-x:hidden;
+  display:flex;align-items:center;justify-content:center;position:relative;padding:40px 20px;}
+canvas{position:absolute;inset:0;width:100%;height:100%;}
+.wrap{position:relative;z-index:2;max-width:700px;text-align:center;}
+.badge{display:inline-block;background:rgba(45,106,79,.18);border:1px solid rgba(45,106,79,.35);
+  color:#95d5b2;padding:6px 16px;border-radius:50px;font-size:.7rem;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;margin-bottom:22px;font-family:sans-serif;
+  opacity:0;animation:fadeIn 1s ease .2s forwards;}
+h1{font-size:clamp(1.6rem,4.5vw,2.6rem);line-height:1.25;margin-bottom:30px;
+  opacity:0;animation:fadeIn 1.2s ease .8s forwards;}
+.timeline{display:flex;flex-direction:column;gap:14px;text-align:left;margin-bottom:30px;}
+.step{display:flex;align-items:center;gap:14px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(82,183,136,.15);border-radius:12px;padding:14px 18px;
+  opacity:0;animation:slideIn .7s ease forwards;font-family:sans-serif;}
+.step:nth-child(1){animation-delay:1.6s;}
+.step:nth-child(2){animation-delay:2.1s;}
+.step:nth-child(3){animation-delay:2.6s;}
+.step:nth-child(4){animation-delay:3.1s;}
+.step:nth-child(5){animation-delay:3.6s;}
+.step-num{background:#2d6a4f;color:white;width:28px;height:28px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0;}
+.step-txt{font-size:.86rem;color:rgba(248,244,232,.8);}
+.step-txt b{color:#95d5b2;}
+p.sub{font-size:.86rem;color:rgba(248,244,232,.5);line-height:1.7;font-family:sans-serif;
+  margin-bottom:32px;opacity:0;animation:fadeIn 1s ease 4.1s forwards;}
+.back{opacity:0;animation:fadeIn 1s ease 4.4s forwards;}
+.back a{display:inline-block;background:linear-gradient(135deg,#2d6a4f,#52b788);color:white;
+  padding:12px 28px;border-radius:50px;text-decoration:none;font-family:sans-serif;
+  font-size:.85rem;font-weight:700;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:none;}}
+@keyframes slideIn{from{opacity:0;transform:translateX(-16px);}to{opacity:1;transform:none;}}
+.tag{position:fixed;bottom:18px;right:22px;font-size:.62rem;color:rgba(255,255,255,.2);
+  font-family:sans-serif;letter-spacing:.1em;}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+  <span class="badge">🐷 Proceso · Video 2 de 3</span>
+  <h1>Mes a mes: el guardián<br>crece y tú cobras</h1>
+  <div class="timeline">
+    <div class="step"><div class="step-num">1</div><div class="step-txt"><b>Mes 1</b> — Adopción confirmada, guardián asignado en la reserva.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-txt"><b>Mes 2–4</b> — Reporte de peso y fotos de tu guardián cada 15 días.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-txt"><b>Cada pago</b> — Confirmación automática, sin sorpresas ni letra pequeña.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-txt"><b>3 árboles</b> — Plantados a tu nombre en la Zona Cañada Norte.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-txt"><b>Mes 5</b> — Guardián alcanza peso objetivo. Liquidación en camino.</div></div>
+  </div>
+  <p class="sub">Cinco meses. Un proceso transparente. Tú siempre sabes en qué va tu inversión.</p>
+  <div class="back"><a href="index.html#dashboard">📊 Ver Dashboard Financiero →</a></div>
+</div>
+<div class="tag">LA ESCONDIDA · REEL 02</div>
+<script>
+const cvs = document.getElementById('bg');
+const ctx = cvs.getContext('2d');
+function resize(){ cvs.width = innerWidth; cvs.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+const particles = Array.from({length:38}, ()=>({
+  x: Math.random()*innerWidth, y: Math.random()*innerHeight,
+  r: Math.random()*2.2+.5, vy:-Math.random()*.3-.08, vx:(Math.random()-.5)*.25,
+  a: Math.random()*.35+.08
+}));
+(function frame(){
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  particles.forEach(p=>{
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.y<-10) p.y = cvs.height+10;
+    if(p.x<-10) p.x = cvs.width+10;
+    if(p.x>cvs.width+10) p.x = -10;
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = '#52b788';
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

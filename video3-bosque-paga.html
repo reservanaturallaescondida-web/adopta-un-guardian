@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video 3 · Día 150: la notificación que lo vale todo · La Escondida</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:linear-gradient(160deg,#030808 0%,#0a1a08 45%,#1a3a2a 100%);
+  font-family:'Georgia',serif;color:#f8f4e8;height:100vh;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;position:relative;}
+canvas{position:absolute;inset:0;width:100%;height:100%;}
+.wrap{position:relative;z-index:2;max-width:640px;padding:40px;text-align:center;}
+.badge{display:inline-block;background:rgba(212,168,67,.14);border:1px solid rgba(212,168,67,.32);
+  color:#d4a843;padding:6px 16px;border-radius:50px;font-size:.7rem;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;margin-bottom:24px;font-family:sans-serif;
+  opacity:0;animation:fadeIn 1s ease .3s forwards;}
+h1{font-size:clamp(1.7rem,4.8vw,2.8rem);line-height:1.25;margin-bottom:22px;
+  opacity:0;animation:fadeIn 1.2s ease 1s forwards;}
+.amount{font-family:'Space Mono',monospace;font-size:clamp(2rem,7vw,3.4rem);font-weight:700;
+  color:#f0c674;margin-bottom:10px;opacity:0;animation:popIn 1s ease 2.1s forwards;
+  text-shadow:0 0 30px rgba(212,168,67,.4);}
+.amount-lbl{font-size:.72rem;color:rgba(255,255,255,.4);text-transform:uppercase;
+  letter-spacing:.1em;font-family:sans-serif;margin-bottom:30px;opacity:0;
+  animation:fadeIn 1s ease 2.6s forwards;}
+p{font-size:.92rem;color:rgba(248,244,232,.6);line-height:1.7;margin-bottom:36px;
+  font-family:sans-serif;font-weight:300;opacity:0;animation:fadeIn 1.2s ease 3.1s forwards;}
+.back{opacity:0;animation:fadeIn 1s ease 3.8s forwards;}
+.back a{display:inline-block;background:linear-gradient(135deg,#d4a843,#f0c674);color:#1a3a2a;
+  padding:12px 28px;border-radius:50px;text-decoration:none;font-family:sans-serif;
+  font-size:.85rem;font-weight:700;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+@keyframes popIn{from{opacity:0;transform:scale(.85);}to{opacity:1;transform:scale(1);}}
+.tag{position:fixed;bottom:18px;right:22px;font-size:.62rem;color:rgba(255,255,255,.2);
+  font-family:sans-serif;letter-spacing:.1em;}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+  <span class="badge">💰 Resultado · Video 3 de 3</span>
+  <h1>Día 150: la notificación<br>que lo vale todo</h1>
+  <div class="amount">$1.414.600</div>
+  <div class="amount-lbl">transferidos a tu cuenta</div>
+  <p>El guardián, los árboles, y el bosque que dejaste crecer.<br>ROI 33.5% en 5 meses. Sin gestionar nada tú mismo.</p>
+  <div class="back"><a href="index.html#adoptar">🌿 Comienza Tu Adopción →</a></div>
+</div>
+<div class="tag">LA ESCONDIDA · REEL 03</div>
+<script>
+const cvs = document.getElementById('bg');
+const ctx = cvs.getContext('2d');
+function resize(){ cvs.width = innerWidth; cvs.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+const particles = Array.from({length:50}, ()=>({
+  x: Math.random()*innerWidth, y: Math.random()*innerHeight,
+  r: Math.random()*2.4+.5, vy:-Math.random()*.45-.1, vx:(Math.random()-.5)*.3,
+  a: Math.random()*.4+.1
+}));
+(function frame(){
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  particles.forEach(p=>{
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.y<-10) p.y = cvs.height+10;
+    if(p.x<-10) p.x = cvs.width+10;
+    if(p.x>cvs.width+10) p.x = -10;
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = '#d4a843';
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
