@@ -1565,7 +1565,8 @@ footer a{color:var(--vl);text-decoration:none;}
   <p style="font-family:'Playfair Display',serif;font-size:1.05rem;color:rgba(255,255,255,.48);margin-bottom:10px;">🌿 Reserva Natural La Escondida</p>
   <p>Programa Adopta un Guardián, Alimenta un Bosque · <a href="#">Términos</a> · <a href="#">Privacidad</a></p>
   <p style="margin-top:10px;">📞 +57 312 590 5353 · 📧 <a href="/cdn-cgi/l/email-protection#bdcfd8ced8cfcbdcd3dcc9c8cfdcd193d1dcd8ceded2d3d9d4d9dcfddad0dcd4d193ded2d0" style="color:var(--vl);text-decoration:none;"><span class="__cf_email__" data-cfemail="9ae8ffe9ffe8ecfbf4fbeeefe8fbf6b4f6fbffe9f9f5f4fef3fefbdafdf7fbf3f6b4f9f5f7">[email&nbsp;protected]</span></a></p>
-  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 45.0 · Reserva Natural La Escondida © 2025</p>
+  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 47.0 · Reserva Natural La Escondida © 2025</p>
+  <div id="aviso-modo-local" style="display:none;"></div>
 </footer>
 <!-- CHAT -->
 <div id="cwid">
@@ -4163,15 +4164,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v45';
-const APP_VERSION_NUM = '45.0';
+const APP_VERSION     = 'v47';
+const APP_VERSION_NUM = '47.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260805-1000';
+const BUILD_ID = '20260807-1000';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4986,7 +4987,9 @@ function playVideo(i){
 function openVideoFull(i){window.open(VFILES[i],'_blank');}
 function initThumbCanvas(id,colA,colB){
   const cvs=document.getElementById(id);if(!cvs)return;
-  const ctx=cvs.getContext('2d');let t=0;
+  const ctx=cvs.getContext('2d');
+  if(!ctx) return; // Canvas bloqueado (ej. protección anti-fingerprinting del navegador) — se omite la animación decorativa sin romper nada más
+  let t=0;
   const pts=Array.from({length:22},()=>({
     x:Math.random()*400,y:Math.random()*300,vx:(Math.random()-.5)*.5,vy:-Math.random()*.3-.08,
     r:Math.random()*2+.5,alpha:Math.random()*.35+.1,col:Math.random()>.5?colA:colB
@@ -7738,59 +7741,101 @@ function subirFotoAdmin(input){
   reader.readAsDataURL(input.files[0]);
 }
 
+// Ejecuta un paso de inicialización de forma aislada: si falla, se registra
+// en consola pero NO detiene los pasos siguientes. Esto evita que un fallo
+// puntual (ej. Canvas bloqueado por una extensión de privacidad) bloquee en
+// cascada la inicialización de los menús, pestañas y el stepper de adopción.
+function pasoInit(nombre, fn){
+  try{ fn(); }
+  catch(e){ console.warn('Fallo en inicialización ('+nombre+') — el resto de la página sigue funcionando:', e); }
+}
+
+// Detecta si el sitio se está viendo en local (file:// o localhost) en vez de
+// en el dominio real de producción, y avisa claramente. Los datos que se ven
+// aquí (adoptantes, pagos) son SIEMPRE independientes del sitio real — cada
+// dirección (origen) tiene su propio almacenamiento en el navegador, nunca se
+// mezclan ni se sobreescriben entre sí.
+function verificarModoLocal(){
+  const esFile      = window.location.protocol === 'file:';
+  const esLocalhost  = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+  const div = document.getElementById('aviso-modo-local');
+  if(!div) return;
+  if(!esFile && !esLocalhost) return; // en producción (Netlify u otro dominio real): no mostrar nada
+
+  div.style.display = 'block';
+  div.innerHTML = `
+    <div style="background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.35);
+      border-radius:8px;padding:8px 14px;margin-top:10px;font-size:.68rem;color:#f0c674;
+      max-width:480px;margin-left:auto;margin-right:auto;line-height:1.6;">
+      🧪 <strong>Modo de prueba local</strong> (${esFile ? 'archivo abierto directamente' : 'servidor local'}).
+      Los adoptantes que ves aquí son independientes del sitio en producción — cada dirección
+      web tiene su propio almacenamiento en el navegador. Esto nunca afecta ni sobreescribe
+      los datos reales de tu sitio ya desplegado.
+    </div>`;
+}
+
 document.addEventListener('DOMContentLoaded',()=>{
-  // Sincronizar texto de versión del pie de página con la fuente de verdad (APP_VERSION_NUM)
-  const fv = document.getElementById('footer-version');
-  if(fv) fv.textContent = 'Versión '+APP_VERSION_NUM+' · Build '+BUILD_ID+' · Reserva Natural La Escondida © 2025';
-  // Restaurar configuración guardada antes de recalcular
-  restaurarDesdeLocalStorage();
-  recalc();
-  // URL: si trae parámetros del dashboard, sobreescriben los valores restaurados
-  cargarDesdeURL();
-  initSincronizacionURL();
-  // URL: si trae adopcion_id&status=exitoso, mostrar confirmación directamente
-  verificarAdopcionEnURL();
-  renderLechones();
-  // Planilla oculta por defecto
-  const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='none';
-  // Videos thumbnails
-  initThumbCanvas('tc0','#95d5b2','#52b788');
-  initThumbCanvas('tc1','#52b788','#2d6a4f');
-  initThumbCanvas('tc2','#d4a843','#f0c674');
-  // Estado inicial stepper
-  adpGo(0);
-  // Dashboard tab inicial
-  swTab('fin',document.querySelector('.tb'));
-  // Flujo tab inicial
-  swFlujo('reg');
-  // Chat bienvenida
-  setTimeout(()=>{
-    actualizarEstadoChat();
-    const est=estadoChat();
-    const saludoHora=()=>{
-      const h=((new Date().getUTCHours()-5)+24)%24;
-      if(h<12)return'¡Buenos días';
-      if(h<18)return'¡Buenas tardes';
-      return'¡Buenas noches';
-    };
-    addBot(`${saludoHora()}! 👋 Bienvenido/a a la Reserva Natural La Escondida. 🌿\n\nGracias por comunicarte con nosotros.\n\nSu mensaje será atendido en el menor tiempo posible.\n\n${est.estado==='en-linea'?'Estamos en línea y listos para ayudarte.':'Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedará registrado.'}`);
-  },1500);
-  // Precio en botón adoptar
-  set('btn-precio',fmt(calcular().primerPago));
-  // Notificaciones con fechas reales
-  renderNotifDinamico();
-  // Verificar recordatorios de pago al cargar
-  setTimeout(()=>{
-    verificarRecordatorios();
-    // Cargar datos demo en el sistema de pagos si hay adoptantes de ejemplo
-    if(adoptantes.length>0 && registroPagos.length===0){
-      adoptantes.forEach(a=> inicializarPagosAdoptante(a, new Date(Date.now()-15*24*60*60*1000)));
-    }
-    // Siempre renderizar dashboard admin para limpiar HTML estático pre-renderizado
-    renderAdmDash();
-  }, 500);
-  // Verificar recordatorios cada hora
-  setInterval(verificarRecordatorios, 3600000);
+  pasoInit('version-footer', ()=>{
+    const fv = document.getElementById('footer-version');
+    if(fv) fv.textContent = 'Versión '+APP_VERSION_NUM+' · Build '+BUILD_ID+' · Reserva Natural La Escondida © 2025';
+  });
+
+  pasoInit('aviso-modo-local', ()=>{ verificarModoLocal(); });
+
+  pasoInit('restaurar-config', ()=>{
+    restaurarDesdeLocalStorage();
+    recalc();
+  });
+
+  pasoInit('sincronizacion-url', ()=>{
+    cargarDesdeURL();
+    initSincronizacionURL();
+    verificarAdopcionEnURL();
+  });
+
+  pasoInit('render-lechones', ()=>{
+    renderLechones();
+    const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='none';
+  });
+
+  pasoInit('thumbnails-video', ()=>{
+    initThumbCanvas('tc0','#95d5b2','#52b788');
+    initThumbCanvas('tc1','#52b788','#2d6a4f');
+    initThumbCanvas('tc2','#d4a843','#f0c674');
+  });
+
+  // ── A partir de aquí: menús, pestañas y stepper — la parte crítica ──
+  pasoInit('stepper-adopcion', ()=>{ adpGo(0); });
+  pasoInit('tab-dashboard',    ()=>{ swTab('fin',document.querySelector('.tb')); });
+  pasoInit('tab-flujo',        ()=>{ swFlujo('reg'); });
+
+  pasoInit('chat-bienvenida', ()=>{
+    setTimeout(()=>{
+      actualizarEstadoChat();
+      const est=estadoChat();
+      const saludoHora=()=>{
+        const h=((new Date().getUTCHours()-5)+24)%24;
+        if(h<12)return'¡Buenos días';
+        if(h<18)return'¡Buenas tardes';
+        return'¡Buenas noches';
+      };
+      addBot(`${saludoHora()}! 👋 Bienvenido/a a la Reserva Natural La Escondida. 🌿\n\nGracias por comunicarte con nosotros.\n\nSu mensaje será atendido en el menor tiempo posible.\n\n${est.estado==='en-linea'?'Estamos en línea y listos para ayudarte.':'Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedará registrado.'}`);
+    },1500);
+  });
+
+  pasoInit('precio-boton', ()=>{ set('btn-precio',fmt(calcular().primerPago)); });
+  pasoInit('notificaciones', ()=>{ renderNotifDinamico(); });
+
+  pasoInit('recordatorios-pago', ()=>{
+    setTimeout(()=>{
+      verificarRecordatorios();
+      if(adoptantes.length>0 && registroPagos.length===0){
+        adoptantes.forEach(a=> inicializarPagosAdoptante(a, new Date(Date.now()-15*24*60*60*1000)));
+      }
+      renderAdmDash();
+    }, 500);
+    setInterval(verificarRecordatorios, 3600000);
+  });
 });
 
 
