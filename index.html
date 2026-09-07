@@ -1565,7 +1565,7 @@ footer a{color:var(--vl);text-decoration:none;}
   <p style="font-family:'Playfair Display',serif;font-size:1.05rem;color:rgba(255,255,255,.48);margin-bottom:10px;">🌿 Reserva Natural La Escondida</p>
   <p>Programa Adopta un Guardián, Alimenta un Bosque · <a href="#">Términos</a> · <a href="#">Privacidad</a></p>
   <p style="margin-top:10px;">📞 +57 312 590 5353 · 📧 <a href="/cdn-cgi/l/email-protection#bdcfd8ced8cfcbdcd3dcc9c8cfdcd193d1dcd8ceded2d3d9d4d9dcfddad0dcd4d193ded2d0" style="color:var(--vl);text-decoration:none;"><span class="__cf_email__" data-cfemail="9ae8ffe9ffe8ecfbf4fbeeefe8fbf6b4f6fbffe9f9f5f4fef3fefbdafdf7fbf3f6b4f9f5f7">[email&nbsp;protected]</span></a></p>
-  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 47.0 · Reserva Natural La Escondida © 2025</p>
+  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 48.0 · Reserva Natural La Escondida © 2025</p>
   <div id="aviso-modo-local" style="display:none;"></div>
 </footer>
 <!-- CHAT -->
@@ -4164,15 +4164,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v47';
-const APP_VERSION_NUM = '47.0';
+const APP_VERSION     = 'v48';
+const APP_VERSION_NUM = '48.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260807-1000';
+const BUILD_ID = '20260908-1200';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -6669,7 +6669,7 @@ function importarRespaldoJSON(event){
   event.target.value = ''; // permitir volver a elegir el mismo archivo después
 }
 
-function confirmarImportarJSON(datosStr){
+async function confirmarImportarJSON(datosStr){
   const datos = JSON.parse(datosStr);
   adoptantes.length = 0;      adoptantes.push(...(datos.adoptantes||[]));
   registroPagos.length = 0;   registroPagos.push(...(datos.registroPagos||[]));
@@ -6687,6 +6687,26 @@ function confirmarImportarJSON(datosStr){
   renderContabilidad();
   verificarRecordatorios();
   showNotif(`✅ Respaldo importado: ${adoptantes.length} adoptante(s) restaurado(s).`);
+
+  // Sincronizar también con Supabase (si está configurado) — sin esto, el
+  // respaldo importado solo vivía en este navegador y volvía a perderse si
+  // se borraba el localStorage o se cambiaba de dispositivo/navegador.
+  if(SUPABASE_CONFIGURADO){
+    let sincronizados = 0;
+    for(const a of adoptantes){
+      const gdnId = (a.gdn||'').split(' ').pop();
+      const gdnNom = (a.gdn||'').split(' ').slice(0,-1).join(' ');
+      const pagosDe = registroPagos.filter(r=>r.adoptante===a.nom);
+      const mesPagado = pagosDe.filter(r=>(r.saldo||0)<=0).length;
+      await guardarAdopcionEnSupabase({
+        id: gdnId, nombre: gdnNom || a.gdn,
+        nombreAdoptante: a.nom, emailAdoptante: a.email,
+        montoPagado: a.inv, mesPagado: mesPagado || 1, txId: a.txId,
+      });
+      sincronizados++;
+    }
+    showNotif(`☁️ ${sincronizados} adoptante(s) también sincronizado(s) con Supabase.`);
+  }
 }
 
 // ── Huella de verificación del archivo (versión / build / hash de clave) ──
