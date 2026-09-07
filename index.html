@@ -1565,7 +1565,7 @@ footer a{color:var(--vl);text-decoration:none;}
   <p style="font-family:'Playfair Display',serif;font-size:1.05rem;color:rgba(255,255,255,.48);margin-bottom:10px;">🌿 Reserva Natural La Escondida</p>
   <p>Programa Adopta un Guardián, Alimenta un Bosque · <a href="#">Términos</a> · <a href="#">Privacidad</a></p>
   <p style="margin-top:10px;">📞 +57 312 590 5353 · 📧 <a href="/cdn-cgi/l/email-protection#bdcfd8ced8cfcbdcd3dcc9c8cfdcd193d1dcd8ceded2d3d9d4d9dcfddad0dcd4d193ded2d0" style="color:var(--vl);text-decoration:none;"><span class="__cf_email__" data-cfemail="9ae8ffe9ffe8ecfbf4fbeeefe8fbf6b4f6fbffe9f9f5f4fef3fefbdafdf7fbf3f6b4f9f5f7">[email&nbsp;protected]</span></a></p>
-  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 48.0 · Reserva Natural La Escondida © 2025</p>
+  <p id="footer-version" style="margin-top:14px;font-size:.68rem;opacity:.35;">Versión 51.0 · Reserva Natural La Escondida © 2025</p>
   <div id="aviso-modo-local" style="display:none;"></div>
 </footer>
 <!-- CHAT -->
@@ -2677,6 +2677,23 @@ function diasAtras(d){const dt=new Date();dt.setDate(dt.getDate()-d);return dt.t
 function scroll2(id){document.getElementById(id)?.scrollIntoView({behavior:'smooth'});}
 function gn(id){return parseFloat(document.getElementById(id)?.value)||0;}
 function fmt(n){return '$'+Math.round(n).toLocaleString('es-CO');}
+
+// Escapa caracteres peligrosos antes de insertar texto proporcionado por el
+// usuario (nombre, email, etc.) dentro de HTML — previene que alguien registre
+// un nombre como  <img src=x onerror=...>  o  x');algo_malicioso();//  y que
+// ese código se ejecute cuando un administrador (o cualquiera) vea esa fila.
+// Seguro tanto para contenido HTML normal como para uso dentro de atributos
+// (ej. onclick="...'${escapeHtml(a.nom)}'...") — el navegador decodifica las
+// entidades HTML antes de que el motor de JS interprete el atributo.
+function escapeHtml(str){
+  if(str==null) return '';
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
 function fmtK(n){return '$'+(n/1000).toFixed(0)+'K';}
 function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 function showNotif(msg){
@@ -4164,15 +4181,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v48';
-const APP_VERSION_NUM = '48.0';
+const APP_VERSION     = 'v51';
+const APP_VERSION_NUM = '51.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260908-1200';
+const BUILD_ID = '20260909-0900';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4257,13 +4274,46 @@ async function buscarGuardianEnSupabase(id){
 }
 
 const PAGO_CFG = {
+  // Enlace de pago fijo (v34-v49) — YA NO SE USA para cobrar, se deja aquí
+  // solo como referencia histórica. El monto de este tipo de enlace es FIJO
+  // en el panel de Wompi y NO responde a ningún parámetro de la URL — por
+  // eso se reemplazó por el Web Checkout dinámico (ver wompiCheckoutUrl abajo).
   wompiLink: 'https://checkout.wompi.co/l/VPOS_Xtf2gG',
   modoLive:  true,
 };
+
+// Llave PÚBLICA de Wompi — esta sí puede estar en el código del navegador
+// con seguridad (Wompi la incluye directamente en la URL de checkout; no es
+// un secreto). La encuentras en tu panel de Wompi → Developers → Secrets
+// for technical integration → "Llave pública" (empieza con pub_prod_ o
+// pub_test_). Reemplaza el valor de abajo con la tuya.
+const WOMPI_PUBLIC_KEY = 'pub_prod_FEs80sarS4ebV6SnJaskdN66TOwPkhTX';
+
+// URL del Web Checkout dinámico de Wompi (acepta monto distinto por cada
+// transacción, a diferencia del enlace de pago fijo de arriba).
+const WOMPI_CHECKOUT_URL = 'https://checkout.wompi.co/p/';
+
 function esModoDemo(){
   if(!PAGO_CFG.modoLive) return true;
   const gdn = selIdx >= 0 ? LDATA[selIdx] : null;
   return gdn && gdn.test === true; // Demo SOLO para TEST-01
+}
+
+// Calcula la firma de integridad llamando a la función servidor (Netlify
+// Function) — el secreto de integridad NUNCA se calcula ni se ve en el
+// navegador, solo existe en la configuración de Netlify.
+async function obtenerFirmaWompi(reference, amountCents, currency){
+  const resp = await fetch('/.netlify/functions/wompi-sign', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ reference, amount: amountCents, currency }),
+  });
+  if(!resp.ok){
+    const err = await resp.json().catch(()=>({error:'Error desconocido'}));
+    throw new Error(err.error || 'No se pudo generar la firma de pago.');
+  }
+  const { signature } = await resp.json();
+  return signature;
 }
 
 // Configuración EmailJS (llenar con tus datos reales)
@@ -4632,17 +4682,44 @@ function procesarPago(met){
   // WOMPI LIVE — solo para método wom, abre en el mismo clic del usuario
   let ventanaWompi = null;
   if(!esModoDemo() && met==='wom'){
-    const wompiUrl = PAGO_CFG.wompiLink
-      + '?reference='         + txId
-      + '&amount-in-cents='   + (montoPagado * 100)
-      + '&customer-data:full-name=' + encodeURIComponent(nom)
-      + '&customer-data:email='     + encodeURIComponent(eml);
-    ventanaWompi = window.open(wompiUrl, '_blank');
-    if(!ventanaWompi){
-      showNotif('⚠️ Permite popups en tu navegador o usa el link: ' + wompiUrl);
-    } else {
-      showNotif('🔒 Redirigiendo a Wompi para completar el pago...');
+    // Abrir la ventana EN BLANCO de forma síncrona, dentro del clic del
+    // usuario — así el navegador no la bloquea. La URL real (con la firma)
+    // se calcula después (async) y se navega esa misma ventana hacia ella.
+    ventanaWompi = window.open('', '_blank');
+    if(ventanaWompi){
+      ventanaWompi.document.write(
+        '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
+        + '<title>Preparando tu pago…</title></head><body style="font-family:sans-serif;'
+        + 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;'
+        + 'background:#0d2a1c;color:#95d5b2;text-align:center;">'
+        + '<div>🔒 Preparando tu pago seguro con Wompi…<br>'
+        + '<span style="font-size:.8rem;opacity:.6;">No cierres esta ventana.</span></div>'
+        + '</body></html>'
+      );
     }
+
+    const amountCents = Math.round(montoPagado * 100);
+    obtenerFirmaWompi(txId, amountCents, 'COP').then(signature=>{
+      const wompiUrl = WOMPI_CHECKOUT_URL
+        + '?public-key='        + encodeURIComponent(WOMPI_PUBLIC_KEY)
+        + '&currency=COP'
+        + '&amount-in-cents='   + amountCents
+        + '&reference='         + encodeURIComponent(txId)
+        + '&signature:integrity=' + encodeURIComponent(signature)
+        + '&customer-data:full-name=' + encodeURIComponent(nom)
+        + '&customer-data:email='     + encodeURIComponent(eml);
+      if(ventanaWompi && !ventanaWompi.closed){
+        ventanaWompi.location.href = wompiUrl;
+      } else {
+        showNotif('⚠️ Permite popups en tu navegador o usa el link: ' + wompiUrl);
+      }
+    }).catch(err=>{
+      console.error('Error generando firma de pago Wompi:', err);
+      if(ventanaWompi && !ventanaWompi.closed) ventanaWompi.close();
+      showNotif('⚠️ No se pudo conectar con la pasarela de pago. Intenta de nuevo en unos segundos.');
+    });
+
+    showNotif('🔒 Redirigiendo a Wompi para completar el pago...');
   }
 
   // EFECTIVO — pre-abrir ventana vacía en el clic del usuario
@@ -6107,57 +6184,67 @@ function renderPlanilla(){
   });
   const estLbl={ok:'✅ Al día',pend:'⚠️ Pendiente',alerta:'🔴 Vencido',compl:'🎉 Completado'};
   const estBg={ok:'rgba(82,183,136,.08)',pend:'rgba(212,168,67,.06)',alerta:'rgba(224,112,112,.08)',compl:'rgba(82,183,136,.05)'};
-  el.innerHTML=datos.map(a=>`
+  el.innerHTML=datos.map(a=>{
+    const nomSeg = escapeHtml(a.nom);
+    const emlSeg = escapeHtml(a.email);
+    const ccSeg  = escapeHtml(a.cc);
+    const ciuSeg = escapeHtml(a.ciu);
+    const telSeg = escapeHtml(a.tel);
+    const gdnSeg = escapeHtml(a.gdn);
+    const txSeg  = escapeHtml(a.txId);
+    const idSeg  = escapeHtml((a.nom||'').replace(/\s/g,'_'));
+    return `
     <tr style="background:${estBg[a.est]||''};border-bottom:1px solid rgba(255,255,255,.04);">
-      <td style="padding:10px 8px;color:#f8f4e8;font-weight:600;">${a.nom}</td>
+      <td style="padding:10px 8px;color:#f8f4e8;font-weight:600;">${nomSeg}</td>
       <td style="padding:10px 8px;color:rgba(255,255,255,.4);font-size:.75rem;">
         <div style="display:flex;align-items:center;gap:5px;">
-          <span>${a.email}</span>
-          <button onclick="editarEmailAdoptante('${a.nom}')" title="Editar email"
+          <span>${emlSeg}</span>
+          <button onclick="editarEmailAdoptante('${nomSeg}')" title="Editar email"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:20px;height:20px;border-radius:5px;cursor:pointer;font-size:.62rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✏️</button>
         </div>
       </td>
       <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;">
         <div style="display:flex;align-items:center;gap:5px;">
-          <span style="font-family:'Space Mono',monospace;">${a.cc||'—'}</span>
-          <button onclick="editarCedulaAdoptante('${a.nom}')" title="Editar cédula"
+          <span style="font-family:'Space Mono',monospace;">${ccSeg||'—'}</span>
+          <button onclick="editarCedulaAdoptante('${nomSeg}')" title="Editar cédula"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:20px;height:20px;border-radius:5px;cursor:pointer;font-size:.62rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✏️</button>
         </div>
       </td>
-      <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;">${a.ciu||'—'}</td>
-      <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;white-space:nowrap;">${a.tel||'—'}</td>
-      <td style="padding:10px 8px;color:#95d5b2;">${a.gdn}</td>
+      <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;">${ciuSeg||'—'}</td>
+      <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;white-space:nowrap;">${telSeg||'—'}</td>
+      <td style="padding:10px 8px;color:#95d5b2;">${gdnSeg}</td>
       <td style="padding:10px 8px;text-align:right;color:#d4a843;">${fmt(a.inv)}</td>
-      <td style="padding:10px 8px;text-align:center;font-size:.76rem;">${a.mes}</td>
-      <td style="padding:10px 8px;text-align:center;font-size:.8rem;">${estLbl[a.est]||a.est}</td>
+      <td style="padding:10px 8px;text-align:center;font-size:.76rem;">${escapeHtml(a.mes)}</td>
+      <td style="padding:10px 8px;text-align:center;font-size:.8rem;">${estLbl[a.est]||escapeHtml(a.est)}</td>
       <td style="padding:10px 8px;text-align:right;color:#52b788;">${fmt(a.ret)}</td>
       <td style="padding:10px 8px;text-align:center;">
         <div style="display:flex;align-items:center;justify-content:center;gap:5px;">
-          <span id="pin-mask-${a.nom.replace(/\s/g,'_')}" style="font-family:'Space Mono',monospace;color:rgba(255,255,255,.35);font-size:.75rem;letter-spacing:.1em;">••••</span>
-          <button onclick="verClavePlanilla('${a.nom}')" title="Ver clave"
+          <span id="pin-mask-${idSeg}" style="font-family:'Space Mono',monospace;color:rgba(255,255,255,.35);font-size:.75rem;letter-spacing:.1em;">••••</span>
+          <button onclick="verClavePlanilla('${nomSeg}')" title="Ver clave"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:.68rem;display:flex;align-items:center;justify-content:center;">👁️</button>
-          <button onclick="restablecerClaveAdoptante('${a.nom}')" title="Restablecer clave (olvidó su acceso)"
+          <button onclick="restablecerClaveAdoptante('${nomSeg}')" title="Restablecer clave (olvidó su acceso)"
             style="background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.28);color:#d4a843;
             width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:.68rem;display:flex;align-items:center;justify-content:center;">🔄</button>
         </div>
       </td>
       <td style="padding:10px 8px;text-align:center;display:flex;gap:5px;justify-content:center;">
-        <button onclick="cambiarEstado('${a.nom}')"
+        <button onclick="cambiarEstado('${nomSeg}')"
           style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
           color:rgba(255,255,255,.5);padding:3px 10px;border-radius:6px;font-size:.65rem;cursor:pointer;">
           Editar
         </button>
-        <button onclick="borrarAdoptante('${a.nom}','${a.txId||''}')"
+        <button onclick="borrarAdoptante('${nomSeg}','${txSeg}')"
           style="background:rgba(224,112,112,.1);border:1px solid rgba(224,112,112,.25);
           color:#e07070;padding:3px 8px;border-radius:6px;font-size:.65rem;cursor:pointer;"
           title="Eliminar adoptante de prueba">
           🗑️
         </button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   const cnt=document.getElementById('plan-count');
   if(cnt)cnt.textContent=datos.length+' adoptante'+(datos.length!==1?'s':'');
 }
