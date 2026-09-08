@@ -1,4 +1,5 @@
-// netlify/functions/wompi-webhook.js
+// netlify/functions/wompi-webhook.js 
+
 //
 // Recibe las notificaciones (eventos) que Wompi envía automáticamente cuando
 // una transacción cambia de estado. Verifica la firma con el "Secreto de
