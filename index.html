@@ -1847,7 +1847,7 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
     <div class="adm-tabs">
       <button class="at" onclick="swAdmTab('dash',this)">📊 Dashboard</button>
       <button class="at" onclick="swAdmTab('adoptantes',this)">👥 Adoptantes</button>
-      <button class="at" onclick="swAdmTab('pagos',this)">💳 Pagos <span id="badge-pagos-venc" style="display:none;background:#e07070;color:white;border-radius:10px;padding:1px 6px;font-size:.6rem;margin-left:3px;">0</span></button>
+      <button class="at" onclick="swAdmTab('pagos',this)">💳 Pagos <span id="badge-pagos-venc" style="display:none;background:#e07070;color:white;border-radius:10px;padding:1px 6px;font-size:.6rem;margin-left:3px;">0</span><span id="badge-pagos-rechazados" title="Pagos rechazados por Wompi" style="display:none;background:#8b1a1a;color:white;border-radius:10px;padding:1px 6px;font-size:.6rem;margin-left:3px;">0</span></button>
       <button class="at" onclick="swAdmTab('contabilidad',this)">📒 Contabilidad</button>
       <button class="at" onclick="swAdmTab('lechones',this)">🐷 Guardianes</button>
       <button class="at" onclick="swAdmTab('chat',this)">💬 Chat <span id="adm-chat-badge" style="display:none;background:#e07070;color:white;border-radius:10px;padding:1px 6px;font-size:.6rem;margin-left:3px;">0</span></button>
@@ -2331,6 +2331,17 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
     <!-- TAB: PAGOS Y SEGUIMIENTO ─────────────────────── -->
     <div id="adm-pagos" class="adm-tp">
 
+      <!-- Alertas de pagos rechazados por Wompi (últimos 30 días) -->
+      <div id="adm-pagos-rechazados-box" style="background:rgba(224,112,112,.05);border:1px solid rgba(224,112,112,.2);border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;">
+          <h4 style="font-size:.78rem;color:#e07070;text-transform:uppercase;letter-spacing:.1em;margin:0;">⚠️ Pagos Rechazados (Wompi · últimos 30 días)</h4>
+          <button onclick="verificarPagosRechazados(false)" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);border-radius:6px;padding:4px 10px;font-size:.65rem;cursor:pointer;">🔄 Actualizar</button>
+        </div>
+        <div id="adm-pagos-rechazados" style="font-size:.8rem;">
+          <p style="color:rgba(255,255,255,.3);font-size:.78rem;">Cargando…</p>
+        </div>
+      </div>
+
       <!-- KPIs de pagos -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
         <div class="adm-kpi"><div class="adm-kpi-v" id="pag-al-dia" style="color:#52b788;">2</div><div class="adm-kpi-l">Al día</div></div>
@@ -2694,6 +2705,15 @@ function escapeHtml(str){
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
+// Prepara un valor para insertarlo como campo CSV: dobla comillas internas
+// (evita romper la fila) y antepone un apóstrofo cuando el valor empieza con
+// =,+,-,@ o tab/CR (evita que Excel/Sheets lo interprete como fórmula si
+// alguien registra un nombre/mensaje tipo  =HYPERLINK(...)  — "CSV injection").
+function csvField(v){
+  let s = String(v==null?'':v).replace(/"/g,'""');
+  if(/^[=+\-@\t\r]/.test(s)) s = "'"+s;
+  return '"'+s+'"';
+}
 function fmtK(n){return '$'+(n/1000).toFixed(0)+'K';}
 function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 function showNotif(msg){
@@ -2822,7 +2842,10 @@ async function mostrarConfirmacionDesdeURL(gdnId, nombreParam){
   const C = calcular();
   const montoMostrar = montoPagado || C.primerPago; // fallback: $430.000 (Mes 1) si no hay dato exacto
   const nombreMostrar = decodeURIComponent(nombreParam||'') || (adoptanteLocal?.nom) || 'Adoptante';
-  const gdnLabel = (guardianNom||'Guardián') + ' ' + gdnId;
+  // guardianNom y txId pueden venir de Supabase (tabla con RLS abierta) — se
+  // tratan como no confiables y se escapan antes de insertarse en el DOM.
+  const gdnLabel = escapeHtml((guardianNom||'Guardián') + ' ' + gdnId);
+  const txIdSeg  = escapeHtml(txId);
 
   // Ocultar el formulario de registro y mostrar el panel de confirmación
   ['adp-steps','adp-p0','adp-p1','adp-p2'].forEach(id=>{
@@ -2848,10 +2871,10 @@ async function mostrarConfirmacionDesdeURL(gdnId, nombreParam){
       </div>
       ${txId ? `<div style="display:flex;justify-content:space-between;padding:6px 0;">
         <span style="color:rgba(255,255,255,.5);font-size:.82rem;">🧾 Referencia</span>
-        <strong style="color:rgba(255,255,255,.6);font-size:.78rem;font-family:'Space Mono',monospace;">${txId}</strong>
+        <strong style="color:rgba(255,255,255,.6);font-size:.78rem;font-family:'Space Mono',monospace;">${txIdSeg}</strong>
       </div>` : ''}
     </div>
-    <button onclick="abrirCertificadoAdoptante('${gdnLabel.replace(/'/g,"\\'")}')"
+    <button onclick="abrirCertificadoAdoptante('${gdnLabel}')"
       style="width:100%;margin-top:14px;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;
       border-radius:10px;padding:13px;color:#1a3a2a;font-weight:700;font-size:.86rem;cursor:pointer;">
       📜 Ver mi Certificado Digital
@@ -2946,6 +2969,7 @@ function swAdmTab(id,btn){
   if(btn)btn.classList.add('act');
   if(id==='dash')         renderAdmDash();
   if(id==='adoptantes'){   renderPlanilla(); verificarAdoptantesHuerfanosAlAbrir(); }
+  if(id==='pagos')        verificarPagosRechazados(false);
   if(id==='pagos')        renderTabPagos();
   if(id==='contabilidad') renderContabilidad();
   if(id==='lechones')     renderAdmLechones();
@@ -3051,8 +3075,8 @@ function renderTabPagos(){
     const saldoColor = r.saldo>0?'color:#e07070':'color:#52b788';
     return `
     <tr style="border-bottom:1px solid rgba(255,255,255,.05);${r.estado==='por-vencer'?'background:rgba(240,198,116,.04);':''}${r.estado==='vencido'?'background:rgba(224,112,112,.04);':''}">
-      <td style="padding:8px 6px;color:#f8f4e8;">${r.adoptante}</td>
-      <td style="padding:8px 6px;color:rgba(255,255,255,.55);font-size:.72rem;">${r.guardian}</td>
+      <td style="padding:8px 6px;color:#f8f4e8;">${escapeHtml(r.adoptante)}</td>
+      <td style="padding:8px 6px;color:rgba(255,255,255,.55);font-size:.72rem;">${escapeHtml(r.guardian)}</td>
       <td style="padding:8px 6px;text-align:center;color:rgba(255,255,255,.7);">Mes ${r.mes}</td>
       <td style="padding:8px 6px;text-align:right;font-family:'Space Mono',monospace;color:#f8f4e8;">${fmt(r.monto)}</td>
       <td style="padding:8px 6px;text-align:right;font-family:'Space Mono',monospace;color:#52b788;">${fmt(r.pagado)}</td>
@@ -3115,10 +3139,10 @@ function abrirModalPagoParcial(idx){
       </div>
       <div style="background:rgba(255,255,255,.04);border-radius:10px;padding:12px;margin-bottom:16px;font-size:.78rem;">
         <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.06);">
-          <span style="color:rgba(255,255,255,.45);">Adoptante</span><strong style="color:#f8f4e8;">${r.adoptante}</strong>
+          <span style="color:rgba(255,255,255,.45);">Adoptante</span><strong style="color:#f8f4e8;">${escapeHtml(r.adoptante)}</strong>
         </div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.06);">
-          <span style="color:rgba(255,255,255,.45);">Guardián</span><strong style="color:#f8f4e8;">${r.guardian}</strong>
+          <span style="color:rgba(255,255,255,.45);">Guardián</span><strong style="color:#f8f4e8;">${escapeHtml(r.guardian)}</strong>
         </div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.06);">
           <span style="color:rgba(255,255,255,.45);">Monto mes</span><strong style="color:#f8f4e8;">${fmt(r.monto)}</strong>
@@ -3262,10 +3286,10 @@ function enviarRecordatoriosPendientes(){
       ${todos.map(r=>`
       <div style="background:rgba(255,255,255,.03);border:1px solid rgba(${r.estado==='vencido'?'224,112,112':'240,198,116'},.2);border-radius:9px;padding:10px 12px;margin-bottom:8px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <strong style="color:#f8f4e8;font-size:.8rem;">${r.adoptante}</strong>
+          <strong style="color:#f8f4e8;font-size:.8rem;">${escapeHtml(r.adoptante)}</strong>
           <span style="font-size:.65rem;color:${r.estado==='vencido'?'#e07070':'#f0c674'};">${r.estado==='vencido'?'🔴 VENCIDO':'⏰ VENCE PRONTO'}</span>
         </div>
-        <div style="font-size:.72rem;color:rgba(255,255,255,.45);">${r.guardian} · Mes ${r.mes} · Saldo: ${fmt(r.saldo)} · Vence: ${r.fechaVence}</div>
+        <div style="font-size:.72rem;color:rgba(255,255,255,.45);">${escapeHtml(r.guardian)} · Mes ${escapeHtml(String(r.mes))} · Saldo: ${fmt(r.saldo)} · Vence: ${escapeHtml(r.fechaVence)}</div>
         <div style="display:flex;gap:6px;margin-top:8px;">
           <a href="https://wa.me/57${r.tel.replace(/\D/g,'')}?text=${encodeURIComponent('Hola '+r.adoptante+'! Te recordamos que tienes un pago pendiente de '+fmt(r.saldo)+' para tu guardián en La Escondida (Mes '+r.mes+'). Vence: '+r.fechaVence+'. Más info: ecomochilas.com 🌿')}"
             target="_blank"
@@ -3273,7 +3297,7 @@ function enviarRecordatoriosPendientes(){
             📱 WhatsApp
           </a>
           <span style="background:rgba(82,183,136,.1);border:1px solid rgba(82,183,136,.2);color:#52b788;border-radius:6px;padding:4px 9px;font-size:.65rem;">
-            📧 ${r.email||'Sin email'}
+            📧 ${escapeHtml(r.email||'Sin email')}
           </span>
         </div>
       </div>`).join('')}
@@ -3332,13 +3356,13 @@ function renderContabilidad(){
   const rows = libroContable.map(m=>{
     saldoAcum += (m.ingreso - m.egreso);
     return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
-      <td style="padding:6px 6px;color:rgba(255,255,255,.45);font-size:.72rem;">${m.fecha}</td>
-      <td style="padding:6px 6px;color:#f8f4e8;font-size:.74rem;">${m.concepto}</td>
-      <td style="padding:6px 6px;color:rgba(255,255,255,.55);font-size:.72rem;">${m.adoptante}</td>
+      <td style="padding:6px 6px;color:rgba(255,255,255,.45);font-size:.72rem;">${escapeHtml(m.fecha)}</td>
+      <td style="padding:6px 6px;color:#f8f4e8;font-size:.74rem;">${escapeHtml(m.concepto)}</td>
+      <td style="padding:6px 6px;color:rgba(255,255,255,.55);font-size:.72rem;">${escapeHtml(m.adoptante)}</td>
       <td style="padding:6px 6px;text-align:right;font-family:'Space Mono',monospace;color:#52b788;font-size:.74rem;">${m.ingreso>0?fmt(m.ingreso):'—'}</td>
       <td style="padding:6px 6px;text-align:right;font-family:'Space Mono',monospace;color:#e07070;font-size:.74rem;">${m.egreso>0?fmt(m.egreso):'—'}</td>
       <td style="padding:6px 6px;text-align:right;font-family:'Space Mono',monospace;color:#d4a843;font-size:.74rem;">${fmt(saldoAcum)}</td>
-      <td style="padding:6px 6px;text-align:center;font-size:.68rem;color:rgba(255,255,255,.4);">${m.tipo}</td>
+      <td style="padding:6px 6px;text-align:center;font-size:.68rem;color:rgba(255,255,255,.4);">${escapeHtml(m.tipo)}</td>
     </tr>`;
   });
   tbody.innerHTML = rows.join('');
@@ -3357,7 +3381,7 @@ function exportarPagosCSV(){
   const bom='\uFEFF';
   const hdr='Adoptante,Guardián,Mes,Concepto,Monto,Pagado,Saldo,FechaVence,Estado\n';
   const rows=registroPagos.map(r=>
-    `"${r.adoptante}","${r.guardian}",${r.mes},"${r.concepto}",${r.monto},${r.pagado},${r.saldo},"${r.fechaVence}","${r.estado}"`
+    [csvField(r.adoptante),csvField(r.guardian),r.mes,csvField(r.concepto),r.monto,r.pagado,r.saldo,csvField(r.fechaVence),csvField(r.estado)].join(',')
   ).join('\n');
   const blob=new Blob([bom+hdr+rows],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a');
@@ -3374,7 +3398,7 @@ function exportarContabilidadCSV(){
   const bom='\uFEFF';
   const hdr='Fecha,Concepto,Adoptante,Ingreso,Egreso,Tipo\n';
   const rows=libroContable.map(m=>
-    `"${m.fecha}","${m.concepto}","${m.adoptante}",${m.ingreso},${m.egreso},"${m.tipo}"`
+    [csvField(m.fecha),csvField(m.concepto),csvField(m.adoptante),m.ingreso,m.egreso,csvField(m.tipo)].join(',')
   ).join('\n');
   const blob=new Blob([bom+hdr+rows],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a');
@@ -3420,10 +3444,10 @@ function generarInformeContable(){
   <table>
     <thead><tr><th>Fecha</th><th>Concepto</th><th>Adoptante</th><th>Ingreso</th><th>Egreso</th><th>Tipo</th></tr></thead>
     <tbody>${libroContable.map(m=>`<tr>
-      <td>${m.fecha}</td><td>${m.concepto}</td><td>${m.adoptante}</td>
+      <td>${escapeHtml(m.fecha)}</td><td>${escapeHtml(m.concepto)}</td><td>${escapeHtml(m.adoptante)}</td>
       <td style="text-align:right;color:#2d6a4f;">${m.ingreso>0?fmt(m.ingreso):'—'}</td>
       <td style="text-align:right;color:#c0392b;">${m.egreso>0?fmt(m.egreso):'—'}</td>
-      <td>${m.tipo}</td></tr>`).join('')}</tbody>
+      <td>${escapeHtml(m.tipo)}</td></tr>`).join('')}</tbody>
     <tfoot><tr style="font-weight:700;background:#f0faf4;">
       <td colspan="3">TOTALES</td>
       <td style="text-align:right;color:#2d6a4f;">${fmt(totIng)}</td>
@@ -3510,7 +3534,7 @@ function exportarChatCSV(){
   if(!msgs.length){showNotif('No hay mensajes para exportar.');return;}
   const bom='\uFEFF';
   const hdr='Fecha,Hora,Usuario,Email,Teléfono,Tipo,Mensaje,Estado,Satisfacción\n';
-  const rows=msgs.map(m=>`"${m.fecha}","${m.hora}","${m.usuario}","${m.email}","${m.tel}","${m.esAdoptante?'Adoptante':'Interesado'}","${m.texto.replace(/"/g,'""')}","${m.estado}","${m.satisfaccion||'—'}"`).join('\n');
+  const rows=msgs.map(m=>[csvField(m.fecha),csvField(m.hora),csvField(m.usuario),csvField(m.email),csvField(m.tel),csvField(m.esAdoptante?'Adoptante':'Interesado'),csvField(m.texto),csvField(m.estado),csvField(m.satisfaccion||'—')].join(',')).join('\n');
   const blob=new Blob([bom+hdr+rows],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
@@ -4181,15 +4205,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v51';
-const APP_VERSION_NUM = '51.0';
+const APP_VERSION     = 'v52';
+const APP_VERSION_NUM = '52.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260909-0900';
+const BUILD_ID = '20260908-1900';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4203,8 +4227,7 @@ const BUILD_ID = '20260909-0900';
 const SUPABASE_URL = 'https://rbryttidysmkkjmmsezj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJicnl0dGlkeXNta2tqbW1zZXpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1OTc5OTMsImV4cCI6MjA4NzE3Mzk5M30.X4zw2X7cULBp4JlpBHT4MIxbmZ_JZG1sP9caiSFD4Ks';
 
-// Esquema esperado en Supabase — pega esto en el Editor SQL de tu
-// proyecto para crear la tabla antes de usar la integración:
+// Esquema esperado en Supabase:
 //
 //   create table guardianes (
 //     id                text primary key,           -- ej. 'G-006'
@@ -4217,10 +4240,11 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 //     tx_id             text,
 //     actualizado_en    timestamptz default now()
 //   );
-//   alter table guardianes enable row level security;
-//   create policy "lectura publica" on guardianes for select using (true);
-//   create policy "escritura publica" on guardianes for insert with check (true);
-//   create policy "actualizacion publica" on guardianes for update using (true);
+//
+// Políticas RLS: ver GUIA_SEGURIDAD_SUPABASE.sql en la raíz del repo — NO
+// uses las políticas "using(true)"/"with check(true)" sin restricciones,
+// ese archivo tiene la versión endurecida (con CHECK de forma/rango) que
+// corresponde al código actual de esta app.
 
 const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('http') && SUPABASE_KEY.length > 20;
 // IMPORTANTE: esta variable NO puede llamarse "supabase" — la librería cargada
@@ -4271,6 +4295,95 @@ async function buscarGuardianEnSupabase(id){
     console.warn('Supabase: error de red al buscar guardián —', e);
     return null;
   }
+}
+
+// ═══ ALERTAS DE PAGOS RECHAZADOS (Wompi) ═══════════════════════════
+// netlify/functions/wompi-webhook.js registra en Supabase (tabla
+// wompi_transacciones) TODA notificación que envía Wompi, aprobada o no.
+// Esto lee las que terminaron rechazadas/erróneas/anuladas para que el
+// admin las vea en el panel sin tener que entrar al dashboard de Wompi.
+const WOMPI_ESTADOS_RECHAZADOS = ['DECLINED','ERROR','VOIDED'];
+const WOMPI_ESTADO_LBL = { DECLINED:'🔴 Rechazado', ERROR:'⚠️ Error', VOIDED:'⛔ Anulado' };
+let pagosRechazados = []; // últimas transacciones no aprobadas leídas de Supabase
+
+async function cargarPagosRechazados(){
+  if(!supabaseClient) return [];
+  try{
+    const desde = new Date(Date.now()-30*24*60*60*1000).toISOString(); // ventana: 30 días
+    const { data, error } = await supabaseClient
+      .from('wompi_transacciones')
+      .select('*')
+      .in('status', WOMPI_ESTADOS_RECHAZADOS)
+      .gte('confirmado_en', desde)
+      .order('confirmado_en', { ascending:false })
+      .limit(50);
+    if(error){ console.warn('Supabase: no se pudieron leer pagos rechazados —', error.message); return pagosRechazados; }
+    pagosRechazados = data||[];
+    return pagosRechazados;
+  }catch(e){
+    console.warn('Supabase: error de red al leer pagos rechazados —', e);
+    return pagosRechazados;
+  }
+}
+
+// Empareja una transacción rechazada con un adoptante conocido por su
+// "reference" (el mismo valor que la app guarda como txId al iniciar el pago).
+function adoptanteDeReferenciaWompi(ref){
+  return adoptantes.find(a=>a.txId===ref) || null;
+}
+
+function renderAlertaPagosRechazados(){
+  const badge = document.getElementById('badge-pagos-rechazados');
+  if(badge){
+    badge.style.display = pagosRechazados.length>0 ? 'inline' : 'none';
+    badge.textContent = pagosRechazados.length;
+  }
+  const sec = document.getElementById('adm-pagos-rechazados');
+  if(!sec) return;
+  if(!SUPABASE_CONFIGURADO){
+    sec.innerHTML = '<p style="color:rgba(255,255,255,.3);font-size:.78rem;">Supabase no está configurado — esta alerta requiere la tabla wompi_transacciones.</p>';
+    return;
+  }
+  if(pagosRechazados.length===0){
+    sec.innerHTML = '<p style="color:rgba(255,255,255,.3);font-size:.78rem;">✅ Sin pagos rechazados en los últimos 30 días.</p>';
+    return;
+  }
+  sec.innerHTML = pagosRechazados.map(t=>{
+    const a = adoptanteDeReferenciaWompi(t.reference);
+    const monto = t.amount_in_cents!=null ? fmt(t.amount_in_cents/100) : '—';
+    const fecha = t.confirmado_en ? new Date(t.confirmado_en).toLocaleString('es-CO') : '—';
+    return `
+    <div style="background:rgba(224,112,112,.06);border:1px solid rgba(224,112,112,.22);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong style="color:#f8f4e8;font-size:.8rem;">${escapeHtml(a?a.nom:'Referencia sin adoptante asociado')}</strong>
+        <span style="font-size:.65rem;color:#e07070;font-weight:700;">${WOMPI_ESTADO_LBL[t.status]||escapeHtml(t.status||'—')}</span>
+      </div>
+      <div style="font-size:.7rem;color:rgba(255,255,255,.45);margin-top:3px;">
+        Monto: ${monto} · Ref: ${escapeHtml(t.reference)} · ${escapeHtml(fecha)}
+      </div>
+      ${a?`<div style="font-size:.68rem;color:rgba(255,255,255,.35);margin-top:2px;">📧 ${escapeHtml(a.email||'—')} · 📞 ${escapeHtml(a.tel||'—')}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+// Consulta Supabase y, si aparecen referencias rechazadas nuevas (no vistas
+// en una sesión anterior), avisa con un toast. La lista completa queda
+// siempre visible en el panel de Pagos mientras no se resuelva el caso.
+async function verificarPagosRechazados(avisarSiHayNuevos){
+  if(!adminAuth || !SUPABASE_CONFIGURADO) return;
+  await cargarPagosRechazados();
+  renderAlertaPagosRechazados();
+  if(!avisarSiHayNuevos) return;
+  let vistos;
+  try{ vistos = new Set(JSON.parse(localStorage.getItem('escondida_pagos_rechazados_vistos')||'[]')); }
+  catch(e){ vistos = new Set(); }
+  const nuevos = pagosRechazados.filter(t=>!vistos.has(t.reference));
+  if(nuevos.length>0){
+    showNotif(`⚠️ ${nuevos.length} pago${nuevos.length!==1?'s':''} rechazado${nuevos.length!==1?'s':''} nuevo${nuevos.length!==1?'s':''} — revisa la pestaña 💳 Pagos.`);
+  }
+  pagosRechazados.forEach(t=>vistos.add(t.reference));
+  // Limitar el set guardado para que no crezca indefinidamente
+  localStorage.setItem('escondida_pagos_rechazados_vistos', JSON.stringify([...vistos].slice(-300)));
 }
 
 const PAGO_CFG = {
@@ -5194,7 +5307,7 @@ let admin2FACode='';
 let admin2FAPendiente=false;
 
 function abrirAdmin(){
-  if(adminAuth){document.getElementById('admin-overlay').classList.add('open');renderAdmDash();actualizarHuellaVerificacion();return;}
+  if(adminAuth){document.getElementById('admin-overlay').classList.add('open');renderAdmDash();actualizarHuellaVerificacion();verificarPagosRechazados(false);return;}
   openMod('mod-cfg');
   setTimeout(()=>document.getElementById('cfg-pwd')?.focus(),200);
   renderLoginSeguridad();
@@ -5259,6 +5372,7 @@ async function verifyCfg(){
     renderLechones();
     actualizarHuellaVerificacion();
     verificarAdoptantesHuerfanosAlAbrir();
+    verificarPagosRechazados(true);
     showNotif('✅ Sesión de administración iniciada.');
   } else {
     // ❌ Clave incorrecta
@@ -5319,6 +5433,7 @@ function verificar2FA(){
     const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='block';
     renderLechones();
     renderAdmDash();renderPlanilla();renderAdmLechones();
+    verificarPagosRechazados(true);
     showNotif('✅ Sesión admin iniciada con 2FA');
   } else {
     if(errEl){errEl.textContent='❌ Código incorrecto. Revisa el código generado.';errEl.style.display='block';}
@@ -5379,8 +5494,8 @@ function renderAdmDash(){
     actEl.innerHTML=rec.map(a=>`
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);">
         <div>
-          <div style="font-size:.8rem;color:#f8f4e8;">${a.nom}</div>
-          <div style="font-size:.68rem;color:rgba(255,255,255,.35);">${a.gdn} · ${a.fecha}</div>
+          <div style="font-size:.8rem;color:#f8f4e8;">${escapeHtml(a.nom)}</div>
+          <div style="font-size:.68rem;color:rgba(255,255,255,.35);">${escapeHtml(a.gdn)} · ${escapeHtml(a.fecha)}</div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:.7rem;">${estIco[a.est]||''} ${a.mes}</div>
@@ -6279,6 +6394,7 @@ function restablecerClaveAdoptante(nom){
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
   div.onclick = e=>{ if(e.target===div) div.remove(); };
   const pinSugerido = (a.cc||'').replace(/\D/g,'').slice(-4) || String(Math.floor(1000+Math.random()*9000));
+  const nomSegR = escapeHtml(a.nom), emlSegR = escapeHtml(a.email);
   div.innerHTML = `
     <div style="background:#0d2a1c;border:2px solid rgba(212,168,67,.35);border-radius:16px;padding:26px;max-width:420px;width:100%;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -6287,8 +6403,8 @@ function restablecerClaveAdoptante(nom){
           style="background:rgba(255,255,255,.08);border:none;color:rgba(255,255,255,.5);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
       </div>
       <p style="font-size:.82rem;color:rgba(255,255,255,.55);margin-bottom:14px;">
-        Adoptante: <strong style="color:#f8f4e8;">${a.nom}</strong><br>
-        Email: <strong style="color:#95d5b2;">${a.email}</strong>
+        Adoptante: <strong style="color:#f8f4e8;">${nomSegR}</strong><br>
+        Email: <strong style="color:#95d5b2;">${emlSegR}</strong>
       </p>
       <label style="font-size:.72rem;color:rgba(149,213,178,.7);display:block;margin-bottom:6px;">Nueva clave (4 dígitos)</label>
       <input type="text" id="nuevo-pin-inp" maxlength="4" inputmode="numeric" value="${pinSugerido}"
@@ -6298,7 +6414,7 @@ function restablecerClaveAdoptante(nom){
       <div style="font-size:.68rem;color:rgba(255,255,255,.35);margin-bottom:16px;">
         Sugerencia precargada: últimos 4 dígitos de su cédula. Puedes cambiarla por cualquier otra de 4 dígitos.
       </div>
-      <button onclick="confirmarResetPin('${nom}')"
+      <button onclick="confirmarResetPin('${nomSegR}')"
         style="width:100%;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;border-radius:9px;
         padding:12px;color:#1a3a2a;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Confirmar nueva clave
@@ -6332,6 +6448,7 @@ function editarCedulaAdoptante(nom){
   div.id = 'modal-editar-cc';
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
   div.onclick = e=>{ if(e.target===div) div.remove(); };
+  const nomSegR = escapeHtml(a.nom), ccSegR = escapeHtml(a.cc||'');
   div.innerHTML = `
     <div style="background:#0d2a1c;border:2px solid rgba(82,183,136,.35);border-radius:16px;padding:26px;max-width:420px;width:100%;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -6340,11 +6457,11 @@ function editarCedulaAdoptante(nom){
           style="background:rgba(255,255,255,.08);border:none;color:rgba(255,255,255,.5);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
       </div>
       <p style="font-size:.82rem;color:rgba(255,255,255,.55);margin-bottom:14px;">
-        Adoptante: <strong style="color:#f8f4e8;">${a.nom}</strong><br>
-        Cédula actual: <strong style="color:#95d5b2;font-family:'Space Mono',monospace;">${a.cc||'— sin registrar —'}</strong>
+        Adoptante: <strong style="color:#f8f4e8;">${nomSegR}</strong><br>
+        Cédula actual: <strong style="color:#95d5b2;font-family:'Space Mono',monospace;">${ccSegR||'— sin registrar —'}</strong>
       </p>
       <label style="font-size:.72rem;color:rgba(149,213,178,.7);display:block;margin-bottom:6px;">Nuevo número de cédula</label>
-      <input type="text" id="nueva-cc-inp" maxlength="12" inputmode="numeric" value="${a.cc||''}"
+      <input type="text" id="nueva-cc-inp" maxlength="12" inputmode="numeric" value="${ccSegR}"
         placeholder="Ej: 1234567890"
         style="width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(82,183,136,.3);
         border-radius:8px;padding:11px;color:#95d5b2;font-size:1.05rem;text-align:center;
@@ -6353,7 +6470,7 @@ function editarCedulaAdoptante(nom){
         <input type="checkbox" id="sync-pin-cc" checked style="accent-color:#52b788;">
         Actualizar también la clave de acceso (últimos 4 dígitos de la nueva cédula)
       </label>
-      <button onclick="confirmarEdicionCC('${nom}')"
+      <button onclick="confirmarEdicionCC('${nomSegR}')"
         style="width:100%;background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:9px;
         padding:12px;color:white;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Guardar cédula
@@ -6394,6 +6511,7 @@ function editarEmailAdoptante(nom){
   div.id = 'modal-editar-email';
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
   div.onclick = e=>{ if(e.target===div) div.remove(); };
+  const nomSegR = escapeHtml(a.nom), emlSegR = escapeHtml(a.email||'');
   div.innerHTML = `
     <div style="background:#0d2a1c;border:2px solid rgba(82,183,136,.35);border-radius:16px;padding:26px;max-width:420px;width:100%;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -6402,11 +6520,11 @@ function editarEmailAdoptante(nom){
           style="background:rgba(255,255,255,.08);border:none;color:rgba(255,255,255,.5);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
       </div>
       <p style="font-size:.82rem;color:rgba(255,255,255,.55);margin-bottom:14px;">
-        Adoptante: <strong style="color:#f8f4e8;">${a.nom}</strong><br>
-        Email actual: <strong style="color:#95d5b2;">${a.email||'— sin registrar —'}</strong>
+        Adoptante: <strong style="color:#f8f4e8;">${nomSegR}</strong><br>
+        Email actual: <strong style="color:#95d5b2;">${emlSegR||'— sin registrar —'}</strong>
       </p>
       <label style="font-size:.72rem;color:rgba(149,213,178,.7);display:block;margin-bottom:6px;">Nuevo email</label>
-      <input type="email" id="nuevo-email-inp" value="${a.email||''}"
+      <input type="email" id="nuevo-email-inp" value="${emlSegR}"
         placeholder="correo@ejemplo.com"
         style="width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(82,183,136,.3);
         border-radius:8px;padding:11px;color:#95d5b2;font-size:.92rem;text-align:center;
@@ -6416,7 +6534,7 @@ function editarEmailAdoptante(nom){
         ⚠️ El adoptante usa este email para entrar a su Panel personal (Dashboard propio).
         Si lo cambias, deberá usar el nuevo correo la próxima vez que inicie sesión.
       </div>
-      <button onclick="confirmarEdicionEmail('${nom}')"
+      <button onclick="confirmarEdicionEmail('${nomSegR}')"
         style="width:100%;background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:9px;
         padding:12px;color:white;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Guardar email
@@ -6556,13 +6674,13 @@ function abrirModalLimpiarPrueba(){
       <div style="background:rgba(224,112,112,.06);border:1px solid rgba(224,112,112,.2);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
         <div style="font-size:.68rem;color:#e07070;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:6px;">Se eliminarán (${presentes.length}):</div>
         <div style="font-size:.8rem;color:rgba(255,255,255,.75);line-height:1.7;">
-          ${presentes.length ? presentes.map(a=>'• '+a.nom).join('<br>') : '<em style="color:rgba(255,255,255,.4);">Ninguno presente actualmente</em>'}
+          ${presentes.length ? presentes.map(a=>'• '+escapeHtml(a.nom)).join('<br>') : '<em style="color:rgba(255,255,255,.4);">Ninguno presente actualmente</em>'}
         </div>
       </div>
       <div style="background:rgba(82,183,136,.06);border:1px solid rgba(82,183,136,.2);border-radius:10px;padding:12px 14px;margin-bottom:18px;">
         <div style="font-size:.68rem;color:#52b788;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:6px;">NO se tocan (${reales.length}) — quedan intactos con sus pagos y recibos:</div>
         <div style="font-size:.8rem;color:rgba(255,255,255,.75);line-height:1.7;">
-          ${reales.length ? reales.map(a=>'• '+a.nom).join('<br>') : '<em style="color:rgba(255,255,255,.4);">No hay otros adoptantes registrados</em>'}
+          ${reales.length ? reales.map(a=>'• '+escapeHtml(a.nom)).join('<br>') : '<em style="color:rgba(255,255,255,.4);">No hay otros adoptantes registrados</em>'}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -6809,7 +6927,7 @@ async function actualizarHuellaVerificacion(){
 function exportarCSV(){
   const hdr='\uFEFF'+'Nombre,Email,Cédula,Teléfono,Dirección,Guardián,Inversión,Retorno,Ganancia,Progreso,Estado,Fecha,Clave,TX ID\n';
   const C=calcular();
-  const rows=adoptantes.map(a=>`"${a.nom}","${a.email||''}","${a.cc||''}","${a.tel||''}","${a.ciu||''}","${a.gdn}",${a.inv},${a.ret},${Math.round((a.ret-a.inv))},"${a.mes}","${a.est}","${a.fecha}","${a.pin||''}","${a.txId||''}"`).join('\n');
+  const rows=adoptantes.map(a=>[csvField(a.nom),csvField(a.email||''),csvField(a.cc||''),csvField(a.tel||''),csvField(a.ciu||''),csvField(a.gdn),a.inv,a.ret,Math.round((a.ret-a.inv)),csvField(a.mes),csvField(a.est),csvField(a.fecha),csvField(a.pin||''),csvField(a.txId||'')].join(',')).join('\n');
   const blob=new Blob([hdr+rows],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
@@ -7028,13 +7146,13 @@ function renderChatAdmin(){
           <span style="background:${m.esAdoptante?'rgba(82,183,136,.2)':'rgba(106,171,204,.2)'};color:${m.esAdoptante?'#52b788':'#6aabcc'};padding:2px 8px;border-radius:10px;font-size:.62rem;font-weight:700;">
             ${m.esAdoptante?'🐷 ADOPTANTE':'👤 INTERESADO'}
           </span>
-          <span style="font-size:.78rem;font-weight:700;color:#f8f4e8;">${m.usuario}</span>
+          <span style="font-size:.78rem;font-weight:700;color:#f8f4e8;">${escapeHtml(m.usuario)}</span>
         </div>
-        <span style="font-size:.62rem;color:rgba(255,255,255,.3);">${m.fecha} ${m.hora}</span>
+        <span style="font-size:.62rem;color:rgba(255,255,255,.3);">${escapeHtml(m.fecha)} ${escapeHtml(m.hora)}</span>
       </div>
-      <p style="font-size:.8rem;color:rgba(255,255,255,.7);margin:0 0 8px;line-height:1.5;">${m.texto}</p>
+      <p style="font-size:.8rem;color:rgba(255,255,255,.7);margin:0 0 8px;line-height:1.5;">${escapeHtml(m.texto)}</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <span style="font-size:.65rem;color:rgba(255,255,255,.3);">📧 ${m.email} · 📞 ${m.tel}</span>
+        <span style="font-size:.65rem;color:rgba(255,255,255,.3);">📧 ${escapeHtml(m.email)} · 📞 ${escapeHtml(m.tel)}</span>
         <select onchange="actualizarEstadoMsg(${i},this.value)"
           style="margin-left:auto;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);border-radius:6px;padding:3px 6px;font-size:.65rem;cursor:pointer;">
           <option value="pendiente" ${m.estado==='pendiente'?'selected':''}>⏳ Pendiente</option>
@@ -7173,7 +7291,7 @@ function renderPanelAdoptante(a){
           ${fmt(proxima.saldo)}
         </div>
       </div>
-      <button onclick="abrirModalPagarCuota('${a.nom}')"
+      <button onclick="abrirModalPagarCuota('${escapeHtml(a.nom)}')"
         style="width:100%;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;
         border-radius:9px;padding:12px;color:#1a3a2a;font-weight:700;font-size:.88rem;
         cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .2s;"
@@ -7190,8 +7308,8 @@ function renderPanelAdoptante(a){
     <div style="display:flex;align-items:center;justify-content:space-between;
       margin-bottom:15px;flex-wrap:wrap;gap:8px;">
       <div>
-        <div style="font-size:.96rem;font-weight:700;color:#f8f4e8;">👋 Hola, ${a.nom.split(' ')[0]}</div>
-        <div style="font-size:.7rem;color:rgba(255,255,255,.35);">${a.email}</div>
+        <div style="font-size:.96rem;font-weight:700;color:#f8f4e8;">👋 Hola, ${escapeHtml(a.nom.split(' ')[0])}</div>
+        <div style="font-size:.7rem;color:rgba(255,255,255,.35);">${escapeHtml(a.email)}</div>
       </div>
       <button onclick="cerrarSesionAdoptante()"
         style="background:rgba(224,112,112,.1);border:1px solid rgba(224,112,112,.22);
@@ -7204,9 +7322,9 @@ function renderPanelAdoptante(a){
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <span style="font-size:1.5rem;">🐷</span>
         <div>
-          <div style="font-size:.88rem;font-weight:700;color:#f8f4e8;">${a.gdn}</div>
+          <div style="font-size:.88rem;font-weight:700;color:#f8f4e8;">${escapeHtml(a.gdn)}</div>
           <div style="font-size:.67rem;color:${estCol[a.est]||'#52b788'};">
-            ${estIco[a.est]||''} ${estLbl[a.est]||a.est}
+            ${estIco[a.est]||''} ${escapeHtml(estLbl[a.est]||a.est)}
           </div>
         </div>
       </div>
@@ -7240,13 +7358,13 @@ function renderPanelAdoptante(a){
         style="background:rgba(149,213,178,.06);border:1px solid rgba(149,213,178,.18);
         border-radius:10px;padding:10px;color:#95d5b2;font-size:.72rem;font-weight:700;
         cursor:pointer;font-family:'DM Sans',sans-serif;">📸 Ver Fotos</button>
-      <button onclick="closeMod('mod-panel-adoptante');abrirCertificadoAdoptante('${a.gdn}')"
+      <button onclick="closeMod('mod-panel-adoptante');abrirCertificadoAdoptante('${escapeHtml(a.gdn)}')"
         style="background:rgba(212,168,67,.06);border:1px solid rgba(212,168,67,.2);
         border-radius:10px;padding:10px;color:#d4a843;font-size:.72rem;font-weight:700;
         cursor:pointer;font-family:'DM Sans',sans-serif;">📜 Certificado</button>
     </div>
     <div style="text-align:center;font-size:.62rem;color:rgba(255,255,255,.2);margin-top:8px;">
-      Adopción: ${a.fecha} · La Escondida © 2025</div>`;
+      Adopción: ${escapeHtml(a.fecha)} · La Escondida © 2025</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7942,6 +8060,10 @@ document.addEventListener('DOMContentLoaded',()=>{
       renderAdmDash();
     }, 500);
     setInterval(verificarRecordatorios, 3600000);
+    // Revisa pagos rechazados de Wompi cada 10 min mientras el admin esté
+    // conectado (no hace nada si no ha iniciado sesión — SUPABASE_CONFIGURADO
+    // + adminAuth se validan dentro de la función).
+    setInterval(()=>verificarPagosRechazados(true), 600000);
   });
 });
 
@@ -7951,6 +8073,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 function generarContratoHTML(nom, cc, tel, eml, ciu, gdn, met){
   const C = calcular();
   const hoy = new Date().toLocaleDateString('es-CO',{day:'2-digit',month:'long',year:'numeric'});
+  nom = escapeHtml(nom); cc = escapeHtml(cc); tel = escapeHtml(tel);
+  eml = escapeHtml(eml); ciu = escapeHtml(ciu); met = escapeHtml(met);
+  const gdnNomSeg = escapeHtml(gdn.nom), gdnIdSeg = escapeHtml(gdn.id);
   return `
     <div style="border-bottom:2px solid rgba(82,183,136,.25);margin-bottom:16px;padding-bottom:12px;">
       <h3 style="color:#95d5b2;font-size:.9rem;margin-bottom:4px;">CONTRATO DE ADOPCIÓN DE GUARDIÁN AGROECOLÓGICO</h3>
@@ -7958,7 +8083,7 @@ function generarContratoHTML(nom, cc, tel, eml, ciu, gdn, met){
     </div>
     <p style="margin-bottom:10px;"><strong style="color:#f8f4e8;">EL ADOPTANTE:</strong> ${nom} · C.C. ${cc||'___________'} · Tel: ${tel} · ${ciu}</p>
     <p style="margin-bottom:10px;"><strong style="color:#f8f4e8;">EMAIL:</strong> ${eml}</p>
-    <p style="margin-bottom:10px;"><strong style="color:#f8f4e8;">GUARDIÁN ASIGNADO:</strong> <span style="color:#95d5b2;">${gdn.nom} (${gdn.id})</span></p>
+    <p style="margin-bottom:10px;"><strong style="color:#f8f4e8;">GUARDIÁN ASIGNADO:</strong> <span style="color:#95d5b2;">${gdnNomSeg} (${gdnIdSeg})</span></p>
     <div style="border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);padding:12px 0;margin:12px 0;">
       <p style="margin-bottom:6px;"><strong style="color:#d4a843;">CONDICIONES ECONÓMICAS:</strong></p>
       <p>Inversión total: <strong style="color:#f8f4e8;">${fmt(C.totalInv)}</strong> en ${C.meses} meses.</p>
@@ -7970,7 +8095,7 @@ function generarContratoHTML(nom, cc, tel, eml, ciu, gdn, met){
     <div style="border:1px solid rgba(82,183,136,.2);border-radius:8px;padding:12px;margin-bottom:10px;background:rgba(82,183,136,.04);">
       <p style="margin-bottom:6px;"><strong style="color:#95d5b2;">OPCIÓN DE RETIRO AL FINAL DEL CICLO:</strong></p>
       <p style="font-size:.8rem;color:rgba(255,255,255,.7);margin-bottom:4px;">
-        ${opcionRetiroSeleccionada===1 ? '🥩 <strong>Canal completa / Por presas</strong> — El adoptante recibe la carne directamente.'+(datosAdoptanteGuardados.tipoEntrega==='presas'&&datosAdoptanteGuardados.cortesSolicitados?.length>0?' Cortes solicitados: '+datosAdoptanteGuardados.cortesSolicitados.join(', ')+'.':'')+(datosAdoptanteGuardados.dirEnvio?' Dirección de envío: '+datosAdoptanteGuardados.dirEnvio:'') :
+        ${opcionRetiroSeleccionada===1 ? '🥩 <strong>Canal completa / Por presas</strong> — El adoptante recibe la carne directamente.'+(datosAdoptanteGuardados.tipoEntrega==='presas'&&datosAdoptanteGuardados.cortesSolicitados?.length>0?' Cortes solicitados: '+escapeHtml(datosAdoptanteGuardados.cortesSolicitados.join(', '))+'.':'')+(datosAdoptanteGuardados.dirEnvio?' Dirección de envío: '+escapeHtml(datosAdoptanteGuardados.dirEnvio):'') :
            opcionRetiroSeleccionada===2 ? '🏘️ <strong>Comercialización en finca</strong> — Costo del 15% sobre ingreso bruto. Retorno en dinero.' :
            opcionRetiroSeleccionada===3 ? '🤝 <strong>Venta a compradores de la reserva</strong> — Costo del 10% sobre ingreso bruto. Retorno en dinero.' :
            '⏳ Pendiente de selección — El adoptante elige al final del ciclo.'}
