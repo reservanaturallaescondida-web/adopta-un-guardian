@@ -2968,7 +2968,7 @@ function swAdmTab(id,btn){
   document.querySelectorAll('.at').forEach(b=>b.classList.remove('act'));
   if(btn)btn.classList.add('act');
   if(id==='dash')         renderAdmDash();
-  if(id==='adoptantes'){   renderPlanilla(); verificarAdoptantesHuerfanosAlAbrir(); }
+  if(id==='adoptantes'){   renderPlanilla(); verificarAdoptantesHuerfanosAlAbrir(); cargarAdoptantesDesdeSupabase(); }
   if(id==='pagos')        verificarPagosRechazados(false);
   if(id==='pagos')        renderTabPagos();
   if(id==='contabilidad') renderContabilidad();
@@ -4205,15 +4205,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v52';
-const APP_VERSION_NUM = '52.0';
+const APP_VERSION     = 'v53';
+const APP_VERSION_NUM = '53.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260908-1900';
+const BUILD_ID = '20260909-1000';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4272,6 +4272,10 @@ async function guardarAdopcionEnSupabase(datos){
       estado:           'adoptado',
       nombre_adoptante: datos.nombreAdoptante,
       email_adoptante:  datos.emailAdoptante,
+      telefono:         datos.telefono || null,
+      direccion:        datos.direccion || null,
+      cedula:           datos.cedula || null,
+      clave:            datos.clave || null,
       monto_pagado:     datos.montoPagado,
       mes_pagado:       datos.mesPagado,
       tx_id:            datos.txId,
@@ -4280,6 +4284,86 @@ async function guardarAdopcionEnSupabase(datos){
     if(error) console.warn('Supabase: no se pudo guardar la adopción —', error.message);
   }catch(e){
     console.warn('Supabase: error de red al guardar la adopción —', e);
+  }
+}
+
+// ── CARGAR ADOPTANTES REALES DESDE SUPABASE (fuente de verdad) ──────────
+// Antes, Supabase solo se usaba para GUARDAR — nunca para leer de vuelta.
+// Por eso, si el navegador local no tenía nada en localStorage (otro
+// dispositivo, caché borrada, modo incógnito, etc.), los adoptantes reales
+// simplemente no aparecían, aunque sí existieran en la nube. Esta función
+// corrige eso: al abrir el panel Admin, consulta Supabase y agrega
+// automáticamente cualquier adoptante real que no esté ya en este navegador.
+async function cargarAdoptantesDesdeSupabase(){
+  if(!supabaseClient) return;
+  try{
+    const { data, error } = await supabaseClient
+      .from('guardianes')
+      .select('*')
+      .eq('estado', 'adoptado');
+    if(error){ console.warn('No se pudo cargar adoptantes desde Supabase:', error.message); return; }
+    if(!data || data.length === 0) return;
+
+    const C = calcular();
+    let agregados = 0;
+
+    data.forEach(row=>{
+      if(!row.email_adoptante && !row.nombre_adoptante) return; // fila sin datos útiles
+      const yaExiste = adoptantes.some(a =>
+        (row.email_adoptante && (a.email||'').toLowerCase() === row.email_adoptante.toLowerCase()) ||
+        (!row.email_adoptante && a.nom === row.nombre_adoptante)
+      );
+      if(yaExiste) return; // ya está en este navegador — no duplicar ni sobreescribir
+
+      const mesPagado = row.mes_pagado || 1;
+      const completo   = mesPagado >= C.meses;
+      const nuevoAd = {
+        nom:   row.nombre_adoptante || 'Adoptante',
+        email: row.email_adoptante || '',
+        tel:   row.telefono  || '',
+        ciu:   row.direccion || '',
+        gdn:   (row.nombre||'') + ' ' + row.id,
+        inv:   C.totalInv,
+        ret:   C.retorno,
+        mes:   'Mes '+mesPagado+'/'+C.meses,
+        est:   completo ? 'compl' : 'ok',
+        fecha: (row.actualizado_en||'').slice(0,10) || diasAtras(0),
+        txId:  row.tx_id || '',
+        cc:    row.cedula || '',
+        pin:   row.clave || (row.cedula ? String(row.cedula).slice(-4) : ''),
+      };
+      adoptantes.unshift(nuevoAd);
+
+      // Reconstruir el calendario de pagos: meses 1..mesPagado como pagados
+      if(!registroPagos.some(r=>r.adoptante===nuevoAd.nom)){
+        for(let m=1; m<=C.meses; m++){
+          const monto = (m===1) ? C.primerPago : (C.bulto+C.admin);
+          const pagado = m <= mesPagado;
+          const hoy = diasAtras(0);
+          registroPagos.push({
+            adoptante: nuevoAd.nom, email: nuevoAd.email, tel: nuevoAd.tel,
+            guardian: nuevoAd.gdn, mes: m,
+            concepto: (m===1) ? 'Lechón + Concentrado + Admin' : 'Concentrado + Admin',
+            monto, pagado: pagado ? monto : 0, saldo: pagado ? 0 : monto,
+            fechaVence: hoy, fechaPago: pagado ? hoy : null,
+            estado: pagado ? 'al-dia' : 'pendiente',
+            historial: pagado ? [{fecha:hoy, monto, tipo:'pago-completo'}] : [],
+            txId: nuevoAd.txId || generarTxId(),
+          });
+        }
+      }
+      agregados++;
+    });
+
+    if(agregados > 0){
+      guardarAdoptantesLocalStorage();
+      renderLechones();
+      renderPlanilla();
+      renderAdmDash();
+      showNotif(`☁️ ${agregados} adoptante(s) recuperado(s) desde Supabase (no estaban guardados en este navegador).`);
+    }
+  }catch(e){
+    console.warn('Error al cargar adoptantes desde Supabase:', e);
   }
 }
 
@@ -4954,6 +5038,8 @@ function procesarPago(met){
     guardarAdopcionEnSupabase({
       id: gdn.id, nombre: gdn.nom,
       nombreAdoptante: nom, emailAdoptante: eml,
+      telefono: nuevoAdoptante.tel, direccion: nuevoAdoptante.ciu,
+      cedula: nuevoAdoptante.cc, clave: nuevoAdoptante.pin,
       montoPagado, mesPagado, txId,
     });
 
@@ -5307,7 +5393,7 @@ let admin2FACode='';
 let admin2FAPendiente=false;
 
 function abrirAdmin(){
-  if(adminAuth){document.getElementById('admin-overlay').classList.add('open');renderAdmDash();actualizarHuellaVerificacion();verificarPagosRechazados(false);return;}
+  if(adminAuth){document.getElementById('admin-overlay').classList.add('open');renderAdmDash();actualizarHuellaVerificacion();verificarPagosRechazados(false);cargarAdoptantesDesdeSupabase();return;}
   openMod('mod-cfg');
   setTimeout(()=>document.getElementById('cfg-pwd')?.focus(),200);
   renderLoginSeguridad();
@@ -5373,6 +5459,7 @@ async function verifyCfg(){
     actualizarHuellaVerificacion();
     verificarAdoptantesHuerfanosAlAbrir();
     verificarPagosRechazados(true);
+    cargarAdoptantesDesdeSupabase();
     showNotif('✅ Sesión de administración iniciada.');
   } else {
     // ❌ Clave incorrecta
@@ -6436,7 +6523,24 @@ function confirmarResetPin(nom){
   guardarAdoptantesLocalStorage();
   document.getElementById('modal-reset-pin')?.remove();
   renderPlanilla();
+  sincronizarAdoptanteConSupabase(a);
   showNotif('✅ Clave de '+a.nom+' restablecida a '+val+'. Comunícasela por WhatsApp o llamada.');
+}
+
+// Sincroniza un adoptante ya existente con Supabase (usado tras editar
+// cédula, email o clave) — mantiene la nube al día como fuente de verdad.
+function sincronizarAdoptanteConSupabase(a){
+  if(!SUPABASE_CONFIGURADO || !a) return;
+  const gdnId  = (a.gdn||'').split(' ').pop();
+  const gdnNom = (a.gdn||'').split(' ').slice(0,-1).join(' ');
+  const pagosDe = registroPagos.filter(r=>r.adoptante===a.nom);
+  const mesPagado = pagosDe.filter(r=>(r.saldo||0)<=0).length || 1;
+  guardarAdopcionEnSupabase({
+    id: gdnId, nombre: gdnNom || a.gdn,
+    nombreAdoptante: a.nom, emailAdoptante: a.email,
+    telefono: a.tel, direccion: a.ciu, cedula: a.cc, clave: a.pin,
+    montoPagado: a.inv, mesPagado, txId: a.txId,
+  });
 }
 
 // ── Editar número de cédula del adoptante ──
@@ -6499,6 +6603,7 @@ function confirmarEdicionCC(nom){
   guardarAdoptantesLocalStorage();
   document.getElementById('modal-editar-cc')?.remove();
   renderPlanilla();
+  sincronizarAdoptanteConSupabase(a);
   showNotif('✅ Cédula de '+a.nom+' actualizada'+(sync?' (clave sincronizada a '+a.pin+')':'')+'.');
 }
 
@@ -6569,6 +6674,7 @@ function confirmarEdicionEmail(nom){
   guardarAdoptantesLocalStorage();
   document.getElementById('modal-editar-email')?.remove();
   renderPlanilla();
+  sincronizarAdoptanteConSupabase(a);
   showNotif('✅ Email de '+a.nom+' actualizado. Antes: '+(emailAnterior||'—')+' → Ahora: '+val);
 }
 
@@ -6906,6 +7012,7 @@ async function confirmarImportarJSON(datosStr){
       await guardarAdopcionEnSupabase({
         id: gdnId, nombre: gdnNom || a.gdn,
         nombreAdoptante: a.nom, emailAdoptante: a.email,
+        telefono: a.tel, direccion: a.ciu, cedula: a.cc, clave: a.pin,
         montoPagado: a.inv, mesPagado: mesPagado || 1, txId: a.txId,
       });
       sincronizados++;
