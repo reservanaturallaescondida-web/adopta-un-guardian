@@ -16,27 +16,26 @@
 //   Environment variables → WOMPI_EVENTS_SECRET (el "Secreto de eventos",
 //   distinto al "Secreto de integridad" que ya configuraste para wompi-sign.js)
 //
-// Tabla requerida en Supabase (ejecutar una sola vez en el SQL Editor):
-//
-//   create table wompi_transacciones (
-//     id                uuid primary key default gen_random_uuid(),
-//     reference         text unique not null,
-//     wompi_transaction_id text,
-//     status            text,
-//     amount_in_cents   numeric,
-//     confirmado_en     timestamptz default now()
-//   );
-//   alter table wompi_transacciones enable row level security;
-//   create policy "lectura publica" on wompi_transacciones for select using (true);
-//   create policy "escritura publica" on wompi_transacciones for insert with check (true);
-//   create policy "actualizacion publica" on wompi_transacciones for update using (true);
-
+// Tabla requerida en Supabase — ver GUIA_SEGURIDAD_SUPABASE.sql para el SQL
+// completo (crea la tabla, activa RLS y dice exactamente qué política usar).
+// IMPORTANTE (endurecimiento de seguridad): esta función YA NO usa la anon
+// key pública para escribir. Antes lo hacía, y como la anon key está
+// embebida en el HTML del sitio (es pública por diseño), CUALQUIERA podía
+// llamar directamente a la REST API de Supabase con esa misma llave e
+// insertar una fila falsa en wompi_transacciones con status "APPROVED" para
+// cualquier referencia — sin haber pagado nada — porque las políticas RLS
+// (using(true) / with check(true)) no distinguían este webhook de un
+// atacante cualquiera. Usando la Service Role Key (que NUNCA se expone al
+// navegador, solo vive aquí como variable de entorno de Netlify) esta
+// función pasa por encima de RLS de forma legítima, y las políticas de la
+// tabla pueden cerrarse para que el rol "anon" ya no pueda escribir en
+// absoluto — solo leer. Configurar en Netlify:
+//   Environment variables → SUPABASE_SERVICE_ROLE_KEY
+//   (Supabase → Project Settings → API → "service_role" secret key — NUNCA
+//   la publiques ni la pongas en el HTML del sitio).
 const crypto = require('crypto');
 
-// Mismas credenciales públicas de Supabase que ya usa el sitio (la anon key
-// no es secreta — depende de las políticas RLS de la tabla, no de ocultarla).
 const SUPABASE_URL = 'https://rbryttidysmkkjmmsezj.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJicnl0dGlkeXNta2tqbW1zZXpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1OTc5OTMsImV4cCI6MjA4NzE3Mzk5M30.X4zw2X7cULBp4JlpBHT4MIxbmZ_JZG1sP9caiSFD4Ks';
 
 // Resuelve una ruta tipo "transaction.id" dentro del objeto data del webhook
 function resolverRuta(obj, ruta){
@@ -66,6 +65,12 @@ exports.handler = async (event) => {
   const secret = process.env.WOMPI_EVENTS_SECRET;
   if (!secret) {
     console.error('WOMPI_EVENTS_SECRET no está configurado en las variables de entorno de Netlify.');
+    return { statusCode: 500, body: JSON.stringify({ error: 'Configuración de servidor incompleta.' }) };
+  }
+
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    console.error('SUPABASE_SERVICE_ROLE_KEY no está configurado en las variables de entorno de Netlify. Ver GUIA_SEGURIDAD_SUPABASE.sql.');
     return { statusCode: 500, body: JSON.stringify({ error: 'Configuración de servidor incompleta.' }) };
   }
 
@@ -107,8 +112,8 @@ exports.handler = async (event) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
         'Prefer': 'resolution=merge-duplicates,return=minimal',
       },
       body: JSON.stringify({
@@ -136,4 +141,3 @@ exports.handler = async (event) => {
     body: JSON.stringify({ recibido: true }),
   };
 };
-
