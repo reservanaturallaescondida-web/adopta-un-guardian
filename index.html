@@ -4205,15 +4205,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v53';
-const APP_VERSION_NUM = '53.0';
+const APP_VERSION     = 'v54';
+const APP_VERSION_NUM = '54.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260909-1000';
+const BUILD_ID = '20260911-1500';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4925,9 +4925,37 @@ function procesarPago(met){
     ventanaRecibo = window.open('', '_blank', 'width=720,height=900,scrollbars=yes');
   }
 
-  // ══════════════════════════════════════════════════════════
-  // Animación de procesamiento (setTimeout OK aquí — solo UI)
-  // ══════════════════════════════════════════════════════════
+  // Contexto con todo lo necesario para finalizar el pago — se guarda
+  // completo porque, para Wompi, la confirmación puede llegar segundos
+  // o minutos después del clic, no de inmediato.
+  const ctxPago = {
+    nom, eml, tel, ciu, gdn, C, txId, met, metLabel, hoy,
+    montoPagado, mesPagado, conceptoPagado, _payVals, ventanaRecibo,
+    selIdxAlComprar: selIdx,
+  };
+
+  if(met==='wom' && !esModoDemo()){
+    // ══════════════════════════════════════════════════════════════
+    // WOMPI: NO marcar como exitoso con un temporizador ciego. Hay que
+    // ESPERAR la confirmación real que llega por wompi-webhook.js y
+    // queda en la tabla wompi_transacciones. Antes de este cambio, el
+    // sitio mostraba "pago exitoso" y registraba al adoptante igual,
+    // incluso si la persona cerraba la ventana de Wompi sin pagar o el
+    // pago era rechazado — esto causó un registro real incorrecto.
+    // ══════════════════════════════════════════════════════════════
+    const stepsWom=[
+      {t:300,  msg:'🔒 Conexión segura...'},
+      {t:800,  msg:'⏳ Verificando datos...'},
+      {t:1400, msg:'🔗 Conectando con Wompi...'},
+    ];
+    stepsWom.forEach(s=>setTimeout(()=>{if(btn)btn.textContent=s.msg;},s.t));
+    setTimeout(()=>iniciarEsperaConfirmacionWompi(txId, ctxPago), 1800);
+    return;
+  }
+
+  // EFECTIVO / NEQUI / PSE / PAYPAL / demo Wompi (TEST-01) — se mantiene
+  // el comportamiento anterior: se autorreporta como exitoso (ninguno de
+  // estos tiene, por ahora, verificación server-to-server como Wompi real).
   const steps=[
     {t:300,  msg:'🔒 Conexión segura...'},
     {t:800,  msg:'⏳ Verificando datos...'},
@@ -4935,137 +4963,206 @@ function procesarPago(met){
     {t:2000, msg:'✅ Autorizando transacción...'}
   ];
   steps.forEach(s=>setTimeout(()=>{if(btn)btn.textContent=s.msg;},s.t));
+  setTimeout(()=>finalizarPagoExitoso(ctxPago), 2800);
+}
 
-  setTimeout(()=>{
-    // Mostrar modal de confirmación
-    document.getElementById('pago-cont').style.display='none';
-    document.getElementById('p-exito').classList.add('show');
-    document.getElementById('pexito-detalle').style.display='block';
-    document.getElementById('pexito-pin-ok').style.display='none';
+// Se ejecuta SOLO cuando un pago queda confirmado (de inmediato para
+// métodos sin verificación real, o tras confirmación real de Wompi).
+function finalizarPagoExitoso(ctx){
+  const {nom, eml, tel, ciu, gdn, C, txId, met, metLabel, hoy,
+         montoPagado, mesPagado, conceptoPagado, _payVals, ventanaRecibo,
+         selIdxAlComprar} = ctx;
 
-    // Guardar datos de la transacción (incluye cuota real pagada)
-    // Para efectivo, guardar cc y tel desde valores capturados síncronamente
-    const _cc  = (met==='efe') ? (_payVals[1]||'—') : '—';
-    const _telEfe = (met==='efe') ? (_payVals[2]||tel) : tel;
-    window._pagoDatos = {nom, eml, tel:_telEfe, cc:_cc, ciu, gdn, C, txId, met, metLabel, hoy, montoPagado, mesPagado, conceptoPagado};
+  // Mostrar modal de confirmación
+  document.getElementById('pago-cont').style.display='none';
+  document.getElementById('p-exito').classList.add('show');
+  document.getElementById('pexito-detalle').style.display='block';
+  document.getElementById('pexito-pin-ok').style.display='none';
 
-    // Llenar desglose del pago
-    const des=document.getElementById('pago-desglose');
-    if(des) des.innerHTML=`
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">👤 Adoptante</span><strong>${nom}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">🐷 Guardián</span><strong>${gdn.nom} (${gdn.id})</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">💳 Método</span><strong>${metLabel}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">📋 Cuota</span><strong>Mes ${mesPagado} de ${C.meses} — ${conceptoPagado}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">💰 Pago realizado</span><strong style="color:#2d6a4f;">${fmt(montoPagado)}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">📅 Próximo pago</span><strong>${mesPagado < C.meses ? fmt(C.bulto+C.admin)+'/mes × '+(C.meses-mesPagado)+' meses restantes' : '✅ Ciclo completado'}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">📈 Inversión total</span><strong>${fmt(C.totalInv)}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">🏆 Retorno esperado</span><strong style="color:#2d6a4f;">${fmt(C.retorno)}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
-        <span style="color:#4a6355;">📊 ROI</span><strong style="color:#2d6a4f;">${C.roi.toFixed(1)}%</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:3px 0;">
-        <span style="color:#4a6355;">🔑 ID Transacción</span>
-        <strong style="font-family:'Space Mono',monospace;font-size:.75rem;color:#1a6a3f;">${txId}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #d0ead8;margin-top:3px;">
-        <span style="color:#4a6355;">📆 Fecha</span><strong>${hoy}</strong>
-      </div>`;
+  // Guardar datos de la transacción (incluye cuota real pagada)
+  // Para efectivo, guardar cc y tel desde valores capturados síncronamente
+  const _cc  = (met==='efe') ? (_payVals[1]||'—') : '—';
+  const _telEfe = (met==='efe') ? (_payVals[2]||tel) : tel;
+  window._pagoDatos = {nom, eml, tel:_telEfe, cc:_cc, ciu, gdn, C, txId, met, metLabel, hoy, montoPagado, mesPagado, conceptoPagado};
 
-    // Activar auto-avance entre campos PIN
-    activarNavegacionPIN();
+  // Llenar desglose del pago
+  const des=document.getElementById('pago-desglose');
+  if(des) des.innerHTML=`
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">👤 Adoptante</span><strong>${escapeHtml(nom)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">🐷 Guardián</span><strong>${escapeHtml(gdn.nom)} (${escapeHtml(gdn.id)})</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">💳 Método</span><strong>${escapeHtml(metLabel)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">📋 Cuota</span><strong>Mes ${mesPagado} de ${C.meses} — ${escapeHtml(conceptoPagado)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">💰 Pago realizado</span><strong style="color:#2d6a4f;">${fmt(montoPagado)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">📅 Próximo pago</span><strong>${mesPagado < C.meses ? fmt(C.bulto+C.admin)+'/mes × '+(C.meses-mesPagado)+' meses restantes' : '✅ Ciclo completado'}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">📈 Inversión total</span><strong>${fmt(C.totalInv)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">🏆 Retorno esperado</span><strong style="color:#2d6a4f;">${fmt(C.retorno)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;border-bottom:1px solid #d0ead8;padding:3px 0;">
+      <span style="color:#4a6355;">📊 ROI</span><strong style="color:#2d6a4f;">${C.roi.toFixed(1)}%</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:3px 0;">
+      <span style="color:#4a6355;">🔑 ID Transacción</span>
+      <strong style="font-family:'Space Mono',monospace;font-size:.75rem;color:#1a6a3f;">${escapeHtml(txId)}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #d0ead8;margin-top:3px;">
+      <span style="color:#4a6355;">📆 Fecha</span><strong>${escapeHtml(hoy)}</strong>
+    </div>`;
 
-    // Marcar guardián como adoptado
-    if(selIdx>=0) LDATA[selIdx].on=false;
-    renderLechones();
-    guardarDatosAdoptante();
+  // Activar auto-avance entre campos PIN
+  activarNavegacionPIN();
 
-    // Registrar en planilla — si ya existe (mismo email), actualizar su fila
-    // en vez de crear una duplicada. Esto es lo que causaba que un mismo
-    // adoptante apareciera dos veces al pagar una cuota 2-5.
-    const _ccNew    = (document.getElementById('a-cc')?.value||'').replace(/[^0-9]/g,'');
-    const existente = eml ? adoptantes.find(a=>(a.email||'').toLowerCase()===eml.toLowerCase()) : null;
+  // Marcar guardián como adoptado (usando el índice capturado al momento
+  // de la compra, no el selIdx actual — pudo haber cambiado mientras se
+  // esperaba la confirmación de Wompi)
+  if(selIdxAlComprar>=0) LDATA[selIdxAlComprar].on=false;
+  renderLechones();
+  guardarDatosAdoptante();
 
-    let nuevoAdoptante;
-    if(existente){
-      existente.mes       = 'Mes '+mesPagado+'/'+C.meses;
-      existente.est       = 'ok';
-      existente.fecha     = diasAtras(0);
-      existente.txId      = txId;
-      existente.met       = met;
-      existente.mesPagado = mesPagado;
-      if(tel) existente.tel = tel;
-      if(ciu) existente.ciu = ciu;
-      if(_ccNew){ existente.cc = _ccNew; if(!existente.pin) existente.pin = _ccNew.slice(-4); }
-      nuevoAdoptante = existente;
+  // Registrar en planilla — si ya existe (mismo email), actualizar su fila
+  // en vez de crear una duplicada. Esto es lo que causaba que un mismo
+  // adoptante apareciera dos veces al pagar una cuota 2-5.
+  const _ccNew    = (document.getElementById('a-cc')?.value||'').replace(/[^0-9]/g,'');
+  const existente = eml ? adoptantes.find(a=>(a.email||'').toLowerCase()===eml.toLowerCase()) : null;
+
+  let nuevoAdoptante;
+  if(existente){
+    existente.mes       = 'Mes '+mesPagado+'/'+C.meses;
+    existente.est       = 'ok';
+    existente.fecha     = diasAtras(0);
+    existente.txId      = txId;
+    existente.met       = met;
+    existente.mesPagado = mesPagado;
+    if(tel) existente.tel = tel;
+    if(ciu) existente.ciu = ciu;
+    if(_ccNew){ existente.cc = _ccNew; if(!existente.pin) existente.pin = _ccNew.slice(-4); }
+    nuevoAdoptante = existente;
+  } else {
+    nuevoAdoptante = {
+      nom, email:eml, tel, ciu,
+      gdn:gdn.nom+' '+gdn.id,
+      inv:C.totalInv, ret:C.retorno,
+      mes:'Mes '+mesPagado+'/'+C.meses, est:'ok',
+      fecha:diasAtras(0), txId, met,
+      mesPagado,
+      cc:_ccNew,
+      pin:_ccNew.slice(-4)
+    };
+    adoptantes.unshift(nuevoAdoptante);
+  }
+  if(adminAuth){renderPlanilla();renderAdmDash();}
+
+  // Inicializar sistema de pagos y contabilidad
+  onAdopcionConfirmada(nuevoAdoptante);
+
+  // Actualizar la URL del navegador con el resultado de la adopción/pago,
+  // y guardar el estado en Supabase si está configurado (persistencia real,
+  // funciona incluso si se abre el enlace en otro navegador/dispositivo).
+  actualizarURLAdopcion(gdn.id, nom);
+  guardarAdopcionEnSupabase({
+    id: gdn.id, nombre: gdn.nom,
+    nombreAdoptante: nom, emailAdoptante: eml,
+    telefono: nuevoAdoptante.tel, direccion: nuevoAdoptante.ciu,
+    cedula: nuevoAdoptante.cc, clave: nuevoAdoptante.pin,
+    montoPagado, mesPagado, txId,
+  });
+
+  // Enviar correo de bienvenida
+  enviarCorreoBienvenida({nom, eml, tel, gdn, C, txId, met});
+
+  // EFECTIVO — escribir el recibo usando valores capturados síncronamente
+  if(met==='efe'){
+    const vals   = _payVals; // capturado síncronamente al inicio de procesarPago
+    const cc     = vals[1]||'—';
+    const telEfe = vals[2]||tel;
+    const reciboHtml = generarReciboEfectivo({nom, cc, tel:telEfe, gdn, C, txId, hoy, ciu, montoPagado, mesPagado, conceptoPagado});
+    // Guardar SIEMPRE para poder reimprimir
+    window._reciboEfectivoHtml = reciboHtml;
+    if(ventanaRecibo && !ventanaRecibo.closed){
+      ventanaRecibo.document.write(reciboHtml);
+      ventanaRecibo.document.close();
+      showNotif('🖨️ Recibo generado en nueva ventana. Imprímelo o descárgalo.');
     } else {
-      nuevoAdoptante = {
-        nom, email:eml, tel, ciu,
-        gdn:gdn.nom+' '+gdn.id,
-        inv:C.totalInv, ret:C.retorno,
-        mes:'Mes '+mesPagado+'/'+C.meses, est:'ok',
-        fecha:diasAtras(0), txId, met,
-        mesPagado,
-        cc:_ccNew,
-        pin:_ccNew.slice(-4)
-      };
-      adoptantes.unshift(nuevoAdoptante);
+      // Popup bloqueado → descarga directa automática
+      mostrarReciboInlineEfectivo(reciboHtml, txId);
     }
-    if(adminAuth){renderPlanilla();renderAdmDash();}
+  }
+}
 
-    // Inicializar sistema de pagos y contabilidad
-    onAdopcionConfirmada(nuevoAdoptante);
+// ── ESPERAR CONFIRMACIÓN REAL DE WOMPI (no marcar éxito a ciegas) ──
+// Consulta wompi_transacciones (llenada por wompi-webhook.js) cada 3
+// segundos, hasta 2 minutos. Solo si Wompi confirma APPROVED se marca
+// el pago como exitoso; si rechaza, o si pasan 2 minutos sin noticia,
+// se informa claramente y NO se registra ninguna adopción falsa.
+function iniciarEsperaConfirmacionWompi(txId, ctx){
+  let intentos = 0;
+  const maxIntentos = 40; // 40 × 3s = 120 segundos de espera máxima
 
-    // Actualizar la URL del navegador con el resultado de la adopción/pago,
-    // y guardar el estado en Supabase si está configurado (persistencia real,
-    // funciona incluso si se abre el enlace en otro navegador/dispositivo).
-    actualizarURLAdopcion(gdn.id, nom);
-    guardarAdopcionEnSupabase({
-      id: gdn.id, nombre: gdn.nom,
-      nombreAdoptante: nom, emailAdoptante: eml,
-      telefono: nuevoAdoptante.tel, direccion: nuevoAdoptante.ciu,
-      cedula: nuevoAdoptante.cc, clave: nuevoAdoptante.pin,
-      montoPagado, mesPagado, txId,
-    });
-
-    // Enviar correo de bienvenida
-    enviarCorreoBienvenida({nom, eml, tel, gdn, C, txId, met});
-
-    // EFECTIVO — escribir el recibo usando valores capturados síncronamente
-    // EFECTIVO — generar y mostrar recibo SIEMPRE
-    if(met==='efe'){
-      const vals   = _payVals; // capturado síncronamente al inicio de procesarPago
-      const cc     = vals[1]||'—';
-      const telEfe = vals[2]||tel;
-      const reciboHtml = generarReciboEfectivo({nom, cc, tel:telEfe, gdn, C, txId, hoy, ciu, montoPagado, mesPagado, conceptoPagado});
-      // Guardar SIEMPRE para poder reimprimir
-      window._reciboEfectivoHtml = reciboHtml;
-      if(ventanaRecibo && !ventanaRecibo.closed){
-        ventanaRecibo.document.write(reciboHtml);
-        ventanaRecibo.document.close();
-        showNotif('🖨️ Recibo generado en nueva ventana. Imprímelo o descárgalo.');
-      } else {
-        // Popup bloqueado → descarga directa automática
-        mostrarReciboInlineEfectivo(reciboHtml, txId);
+  const chequear = async () => {
+    intentos++;
+    const btn = document.querySelector('.btn-pay');
+    if(btn) btn.textContent = '⏳ Esperando confirmación de Wompi... ('+intentos+')';
+    if(!supabaseClient){
+      mostrarFalloConfirmacionWompi(ctx, 'no_verificable');
+      return;
+    }
+    try{
+      const { data, error } = await supabaseClient
+        .from('wompi_transacciones')
+        .select('status')
+        .eq('reference', txId)
+        .maybeSingle();
+      if(!error && data && data.status){
+        if(data.status === 'APPROVED'){
+          finalizarPagoExitoso(ctx);
+          return;
+        }
+        mostrarFalloConfirmacionWompi(ctx, 'rechazado', data.status);
+        return;
       }
+    }catch(e){
+      console.warn('Error consultando confirmación de Wompi:', e);
     }
+    if(intentos >= maxIntentos){
+      mostrarFalloConfirmacionWompi(ctx, 'sin_confirmar');
+      return;
+    }
+    setTimeout(chequear, 3000);
+  };
+  chequear();
+}
 
-  },2800);
+function mostrarFalloConfirmacionWompi(ctx, motivo, statusReal){
+  const btn = document.querySelector('.btn-pay');
+  if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='Reintentar pago'; }
+  let msg;
+  if(motivo==='rechazado'){
+    msg = '❌ Wompi reportó que el pago no fue aprobado (estado: '+(statusReal||'desconocido')+'). No se registró ninguna adopción. Si crees que esto es un error, contáctanos por WhatsApp con tu comprobante.';
+  } else if(motivo==='sin_confirmar'){
+    msg = '⏳ Aún no recibimos confirmación de Wompi después de 2 minutos. Si el dinero salió de tu cuenta, contáctanos por WhatsApp con tu comprobante para verificarlo manualmente — por favor no intentes pagar de nuevo sin avisarnos primero.';
+  } else {
+    msg = '⚠️ No pudimos verificar automáticamente tu pago en este momento. Contáctanos por WhatsApp con tu comprobante para confirmarlo manualmente.';
+  }
+  showNotif(msg);
+  const errDiv = document.getElementById('pago-modal-err');
+  if(errDiv){
+    errDiv.textContent = msg;
+    errDiv.style.display = 'block';
+  }
 }
 
 // ═══ SISTEMA PIN ADOPTANTE ═══
