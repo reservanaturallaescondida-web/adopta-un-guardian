@@ -2650,6 +2650,9 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
       <button onclick="exportarGuiaAdmin()" style="width: 100%; margin-top: 10px; background: rgba(212, 168, 67, 0.12); border: 1px solid rgba(212, 168, 67, 0.35); border-radius: 10px; padding: 12px; color: rgb(212, 168, 67); font-weight: 700; cursor: pointer; font-size: 0.82rem; transition: background 0.2s;" onmouseover="this.style.background='rgba(212,168,67,.22)'" onmouseout="this.style.background='rgba(212,168,67,.12)'">
         📄 Exportar GUIA_ADMIN actualizada
       </button>
+      <button onclick="sincronizarTodoManualmente()" style="width: 100%; margin-top: 10px; background: rgba(82,183,136,.10); border: 1px solid rgba(82,183,136,.35); border-radius: 10px; padding: 12px; color: rgb(149,213,178); font-weight: 700; cursor: pointer; font-size: 0.82rem; transition: background 0.2s;" onmouseover="this.style.background='rgba(82,183,136,.20)'" onmouseout="this.style.background='rgba(82,183,136,.10)'">
+        🔄 Sincronizar todo a Supabase (este navegador)
+      </button>
       <div id="save-ok" style="display: none; margin-top: 10px; color: rgb(82, 183, 136); font-size: 0.8rem;">✅ Cambios aplicados al dashboard.</div>
       <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
         border-radius:10px;padding:14px;margin-top:10px;font-size:.74rem;line-height:1.85;color:rgba(255,255,255,.5);">
@@ -2669,6 +2672,13 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
           <strong style="color:#6aabcc;">💽 Guardar en este navegador</strong> —
           Guarda en localStorage de <em>este dispositivo</em>. Persiste entre sesiones
           locales, pero NO en Netlify ni otros dispositivos.
+        </div>
+        <div style="margin-bottom:8px;">
+          <strong style="color:#95d5b2;">🔄 Sincronizar todo a Supabase</strong> —
+          Sube la planilla de adoptantes y la configuración de <em>este navegador</em> a Supabase
+          (tablas protegidas `adoptantes`/`config_sitio`), para que cualquier otro navegador/dispositivo
+          que inicie sesión de admin vea lo mismo. Normalmente no hace falta tocarlo — se sincroniza
+          solo al guardar cambios — pero úsalo si este navegador es el que tiene los datos correctos.
         </div>
         <div>
           <strong style="color:#d4a843;">📄 Exportar Guía Admin</strong> —
@@ -4205,15 +4215,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v54';
-const APP_VERSION_NUM = '54.0';
+const APP_VERSION     = 'v55';
+const APP_VERSION_NUM = '55.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260911-1500';
+const BUILD_ID = '20260914-2300';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4287,14 +4297,14 @@ async function guardarAdopcionEnSupabase(datos){
   }
 }
 
-// ── CARGAR ADOPTANTES REALES DESDE SUPABASE (fuente de verdad) ──────────
-// Antes, Supabase solo se usaba para GUARDAR — nunca para leer de vuelta.
-// Por eso, si el navegador local no tenía nada en localStorage (otro
-// dispositivo, caché borrada, modo incógnito, etc.), los adoptantes reales
-// simplemente no aparecían, aunque sí existieran en la nube. Esta función
-// corrige eso: al abrir el panel Admin, consulta Supabase y agrega
-// automáticamente cualquier adoptante real que no esté ya en este navegador.
-async function cargarAdoptantesDesdeSupabase(){
+// ── CARGAR ADOPTANTES REALES DESDE SUPABASE — MÉTODO DE RESPALDO (v54) ──
+// Reconstruye adoptantes leyendo guardianes.nombre_adoptante/email_adoptante
+// (columnas que, por ahora, son de lectura pública). v55 agrega un método
+// PRINCIPAL más completo y protegido (tabla `adoptantes` dedicada, ver más
+// abajo "cargarPlanillaCompletaDesdeSupabase") — este método se conserva
+// como respaldo automático mientras esa tabla nueva no tenga todavía los
+// datos migrados, para no perder esta funcionalidad durante la transición.
+async function cargarAdoptantesDesdeGuardianesSupabase(){
   if(!supabaseClient) return;
   try{
     const { data, error } = await supabaseClient
@@ -4378,6 +4388,142 @@ async function buscarGuardianEnSupabase(id){
   }catch(e){
     console.warn('Supabase: error de red al buscar guardián —', e);
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN COMPLETA Y PROTEGIDA DE ADOPTANTES/CONFIG (v55)
+// ═══════════════════════════════════════════════════════════════
+// El método de arriba (cargarAdoptantesDesdeGuardianesSupabase) reconstruye
+// adoptantes a partir de columnas de `guardianes` que hoy son de lectura
+// pública (nombre_adoptante, email_adoptante, y desde v54 también telefono,
+// direccion, cedula, clave) — eso significa que cualquiera con la anon key
+// pública (visible en el código fuente del sitio) puede leer la cédula y el
+// PIN de acceso de cada adoptante real. v55 corrige esto de raíz con una
+// tabla dedicada `adoptantes` y una función de servidor protegida:
+//   • GUARDAR (insert/update) sigue siendo público con la anon key, igual
+//     que `guardianes` — lo necesita el navegador del adoptante justo
+//     después de pagar. Acotado con CHECK (ver GUIA_SEGURIDAD_SUPABASE_v3.sql).
+//   • LEER la planilla completa y BORRAR una fila requieren la contraseña
+//     real de administrador, verificada en el SERVIDOR por
+//     netlify/functions/admin-adoptantes.js (con la Service Role Key) —
+//     nunca con la anon key pública.
+//   • `config_sitio` (precios, contacto, banco): lectura pública (el sitio
+//     necesita mostrarlos a cualquier visitante), escritura protegida.
+// Una vez que la planilla esté migrada a esta tabla nueva (botón "🔄
+// Sincronizar todo a Supabase"), se puede cerrar también la lectura pública
+// de guardianes.nombre_adoptante/email_adoptante/telefono/direccion/cedula/
+// clave — ver la sección 3 de GUIA_SEGURIDAD_SUPABASE_v3.sql.
+
+let ADMIN_PASS_PLANO_SESION = null; // contraseña en texto plano, SOLO en memoria de esta sesión — nunca en localStorage
+
+async function llamarFuncionAdmin(accion, payload){
+  if(!ADMIN_PASS_PLANO_SESION) throw new Error('No hay una sesión de administrador activa para sincronizar con el servidor.');
+  const resp = await fetch('/.netlify/functions/admin-adoptantes', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ clave: ADMIN_PASS_PLANO_SESION, accion, ...payload }),
+  });
+  const datos = await resp.json().catch(()=>({}));
+  if(!resp.ok) throw new Error(datos.error || `Error del servidor (${resp.status}).`);
+  return datos;
+}
+
+function filaAdoptanteParaSupabase(a){
+  return {
+    cc:     String(a.cc||'').trim(),
+    nom:    a.nom  ?? null,
+    email:  a.email?? null,
+    tel:    a.tel  ?? null,
+    ciu:    a.ciu  ?? null,
+    gdn:    a.gdn  ?? null,
+    inv:    a.inv  ?? null,
+    ret:    a.ret  ?? null,
+    mes:    a.mes  ?? null,
+    est:    a.est  ?? null,
+    fecha:  a.fecha?? null,
+    pin:    a.pin  ?? null,
+    tx_id:  a.txId ?? null,
+  };
+}
+
+// Guarda TODA la planilla actual en Supabase (upsert masivo, por cédula).
+// Público (anon key) y acotado por políticas CHECK — no expone lectura.
+async function sincronizarAdoptantesConSupabase(){
+  if(!supabaseClient) return;
+  try{
+    const filas = adoptantes.filter(a=>a.cc).map(filaAdoptanteParaSupabase);
+    if(filas.length===0) return;
+    const { error } = await supabaseClient.from('adoptantes').upsert(filas, {onConflict:'cc'});
+    if(error) console.warn('Supabase: no se pudo sincronizar la planilla de adoptantes —', error.message);
+  }catch(e){ console.warn('Supabase: error de red sincronizando adoptantes —', e); }
+}
+
+async function eliminarAdoptanteDeSupabase(cc){
+  if(!SUPABASE_CONFIGURADO || !cc) return;
+  try{ await llamarFuncionAdmin('borrar_adoptante', {cc:String(cc)}); }
+  catch(e){ console.warn('Supabase: no se pudo borrar el adoptante —', e.message||e); }
+}
+
+// Carga la planilla COMPLETA y protegida desde la tabla `adoptantes` — este
+// es el método PRINCIPAL en v55. Requiere sesión de admin. Devuelve true si
+// encontró y cargó datos (para que el llamador decida si además necesita
+// el método de respaldo más simple, heredado de v54).
+async function cargarPlanillaCompletaDesdeSupabase(){
+  if(!SUPABASE_CONFIGURADO) return false;
+  try{
+    const datos = await llamarFuncionAdmin('leer_adoptantes', {});
+    if(Array.isArray(datos.adoptantes) && datos.adoptantes.length>0){
+      adoptantes.length = 0;
+      adoptantes.push(...datos.adoptantes.map(f=>({
+        cc:f.cc, nom:f.nom, email:f.email, tel:f.tel, ciu:f.ciu, gdn:f.gdn,
+        inv:f.inv, ret:f.ret, mes:f.mes, est:f.est, fecha:f.fecha, pin:f.pin, txId:f.tx_id,
+      })));
+      try{ localStorage.setItem('escondida_adoptantes', JSON.stringify(adoptantes)); }catch(e){}
+      return true;
+    }
+  }catch(e){ console.warn('Supabase: no se pudo cargar la planilla completa (se intenta el método de respaldo) —', e.message||e); }
+  return false;
+}
+
+// Punto de entrada único que ya usan los llamadores existentes: intenta
+// primero el método completo/protegido, y si no hay nada ahí todavía
+// (planilla no migrada aún, o sesión sin contraseña disponible), recurre
+// automáticamente al método de respaldo heredado de v54.
+async function cargarAdoptantesDesdeSupabase(){
+  const ok = await cargarPlanillaCompletaDesdeSupabase();
+  if(ok){ renderPlanilla(); renderAdmDash(); renderContabilidad(); showNotif('☁️ Planilla actualizada desde Supabase.'); return true; }
+  await cargarAdoptantesDesdeGuardianesSupabase();
+  return false;
+}
+
+async function cargarConfigDesdeSupabase(){
+  if(!supabaseClient) return false;
+  try{
+    const { data, error } = await supabaseClient.from('config_sitio').select('*').eq('id',1).maybeSingle();
+    if(error || !data) return false;
+    localStorage.setItem('escondida_config', JSON.stringify(data));
+    return true;
+  }catch(e){ console.warn('Supabase: no se pudo cargar la configuración —', e); return false; }
+}
+
+async function guardarConfigEnSupabase(cfg){
+  if(!SUPABASE_CONFIGURADO) return;
+  try{ await llamarFuncionAdmin('guardar_config', {config: cfg}); }
+  catch(e){ console.warn('Supabase: no se pudo guardar la configuración —', e.message||e); }
+}
+
+// Botón "🔄 Sincronizar todo a Supabase" — migración inicial o recuperación
+// manual: sube TODO lo que este navegador tiene guardado localmente ahora.
+async function sincronizarTodoManualmente(){
+  showNotif('☁️ Sincronizando con Supabase…');
+  try{
+    await sincronizarAdoptantesConSupabase();
+    const cfg = JSON.parse(localStorage.getItem('escondida_config')||'{}');
+    await guardarConfigEnSupabase(cfg);
+    showNotif('✅ Sincronización completa — este navegador ahora es la fuente de verdad en Supabase.');
+  }catch(e){
+    showNotif('⚠️ Falló la sincronización: '+(e.message||e));
   }
 }
 
@@ -5535,6 +5681,7 @@ async function verifyCfg(){
   if(vHash === ADMIN_PASS_HASH_ACTUAL){
     // ✅ Clave correcta — acceso directo sin 2FA
     loginIntentos = 0;
+    ADMIN_PASS_PLANO_SESION = v; // en memoria — necesaria para sincronizar con Supabase (nunca se guarda en localStorage)
     inp.value = '';
     if(errEl) errEl.style.display = 'none';
     adminAuth = true;
@@ -5557,6 +5704,7 @@ async function verifyCfg(){
     verificarAdoptantesHuerfanosAlAbrir();
     verificarPagosRechazados(true);
     cargarAdoptantesDesdeSupabase();
+    cargarConfigDesdeSupabase().then(ok=>{ if(ok){ restaurarDesdeLocalStorage(); renderAdmDash(); } });
     showNotif('✅ Sesión de administración iniciada.');
   } else {
     // ❌ Clave incorrecta
@@ -5640,6 +5788,7 @@ function cancelar2FA(){
 function cerrarAdmin(){document.getElementById('admin-overlay').classList.remove('open');}
 function cerrarSesionAdmin(){
   adminAuth=false;cerrarAdmin();
+  ADMIN_PASS_PLANO_SESION = null; // v55: no dejar la contraseña en memoria tras cerrar sesión
   const nb=document.getElementById('nav-admin-btn');
   if(nb){ nb.textContent='⚙️ Admin'; nb.classList.remove('active'); }
   const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='none';
@@ -5840,6 +5989,9 @@ function guardarEnLocalStorage(){
   try{
     localStorage.setItem('escondida_config', JSON.stringify(cfg));
   } catch(e){ showNotif('⚠️ localStorage no disponible en este navegador.'); }
+  // v55: sincroniza la configuración con Supabase (requiere sesión de admin
+  // activa) para que sea la misma en cualquier navegador/dispositivo.
+  guardarConfigEnSupabase(cfg);
 }
 
 // ── RESTAURAR DESDE LOCALSTORAGE AL CARGAR ────────────
@@ -5864,6 +6016,9 @@ function guardarAdoptantesLocalStorage(){
     localStorage.setItem('escondida_registro_pagos',JSON.stringify(registroPagos));
     localStorage.setItem('escondida_libro_contable',JSON.stringify(libroContable));
   }catch(e){ console.warn('No se pudo guardar adoptantes:', e); }
+  // v55: además de este navegador, sincroniza la planilla con la tabla
+  // protegida `adoptantes` en Supabase (ver sincronizarAdoptantesConSupabase()).
+  sincronizarAdoptantesConSupabase();
 }
 
 // ── Fusiona entradas duplicadas del mismo adoptante (mismo email o nombre) ──
@@ -6831,8 +6986,12 @@ function confirmarBorrarAdoptante(nom, txId){
   // Eliminar de adoptantes — por email si está disponible (más preciso), si no por nombre
   const coincide = a => email ? (a.email||'').toLowerCase()===email.toLowerCase() : a.nom===nom;
   const restantesAd = adoptantes.filter(a=>!coincide(a));
+  const eliminadosCC = adoptantes.filter(coincide).map(a=>a.cc).filter(Boolean);
   adoptantes.length=0;
   adoptantes.push(...restantesAd);
+  // v55: el borrado en la tabla `adoptantes` de Supabase requiere contraseña
+  // de admin (función protegida) — a diferencia de guardar, que es público.
+  eliminadosCC.forEach(cc=>eliminarAdoptanteDeSupabase(cc));
 
   // Eliminar de registroPagos (por nombre — es la clave usada en ese array)
   const ants=registroPagos.filter(r=>r.adoptante!==nom);
@@ -6915,6 +7074,8 @@ function ejecutarLimpiarPrueba(){
   // Filtrar SOLO los nombres de prueba — todo lo demás (Juan Ángel, oamo, etc.) queda igual
   const restantesAd = adoptantes.filter(a=>!ADOPTANTES_PRUEBA.includes(a.nom));
   adoptantes.length=0; adoptantes.push(...restantesAd);
+  // v55: borrar también de la tabla `adoptantes` en Supabase (función protegida)
+  eliminados.map(a=>a.cc).filter(Boolean).forEach(cc=>eliminarAdoptanteDeSupabase(cc));
 
   const restantesPagos = registroPagos.filter(r=>!ADOPTANTES_PRUEBA.includes(r.adoptante));
   registroPagos.length=0; registroPagos.push(...restantesPagos);
