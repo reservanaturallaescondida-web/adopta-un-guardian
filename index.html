@@ -1887,6 +1887,7 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
           <option value="pend">⚠️ Pendiente</option>
           <option value="alerta">🔴 Vencido</option>
           <option value="compl">🎉 Completado</option>
+          <option value="verif">🕓 Por verificar</option>
         </select>
         <button onclick="exportarCSV()" style="background:rgba(82,183,136,.12);border:1px solid rgba(82,183,136,.25);color:#52b788;padding:8px 14px;border-radius:8px;font-size:.78rem;cursor:pointer;white-space:nowrap;">
           📥 Exportar CSV
@@ -2640,7 +2641,7 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
         </button>
         <button onclick="exportarHTMLActualizado()" style="background:linear-gradient(135deg,#4a2d7a,#7b5ea7);border:none;border-radius:10px;
           padding:13px;color:white;font-weight:700;cursor:pointer;font-size:.84rem;">
-          📥 Exportar HTML → subir a Netlify
+          📥 Exportar HTML → subir a GitHub
         </button>
       </div>
       <!-- BOTÓN GUARDAR CAMBIOS — persiste en localStorage -->
@@ -3244,6 +3245,15 @@ function confirmarPagoParcial(idx){
 
   document.getElementById('modal-pago-parcial')?.remove();
   guardarAdoptantesLocalStorage();   // ← persistir pago
+  // v57: registrar también en el servidor (fuente de verdad) y refrescar
+  const _ad = adoptantes.find(x=>x.nom===r.adoptante);
+  if(adminAuth && SUPABASE_CONFIGURADO && _ad && _ad.cc){
+    llamarFuncionAdmin('registrar_pago', {cc:_ad.cc, mes:r.mes, monto, metodo:met})
+      .then(()=>cargarFinanzasDesdeServidor())
+      .catch(e=>showNotif('⚠️ El pago quedó solo en este navegador: '+(e.message||e)));
+  } else if(adminAuth){
+    showNotif('⚠️ Este adoptante no tiene cédula: el pago quedó solo en este navegador.');
+  }
   renderTabPagos();
   renderContabilidad();
   showNotif(`✅ Pago de ${fmt(monto)} registrado para ${r.adoptante} — Mes ${r.mes}`);
@@ -3326,7 +3336,8 @@ function registrarMovimientoContable({fecha, concepto, adoptante, ingreso, egres
     fecha, concepto, adoptante,
     ingreso:  ingreso||0,
     egreso:   egreso||0,
-    tipo:     tipo||'Otro'
+    tipo:     tipo||'Otro',
+    _noSubir: true   // v57: asiento creado en este navegador; el oficial lo crea el servidor
   });
 }
 
@@ -3827,12 +3838,14 @@ function renderPayMo(){
 }
 
 // ═══ LECHONES ═══
+// v56: la disponibilidad REAL viene de Supabase (tabla guardianes) — ver
+// cargarDisponibilidadDesdeSupabase(). Aquí todos parten como disponibles.
 const LDATA=[
-  {id:'G-001',nom:'Bambú',on:true},{id:'G-002',nom:'Cacao',on:true},{id:'G-003',nom:'Guadua',on:false},
-  {id:'G-004',nom:'Palma',on:true},{id:'G-005',nom:'Roble',on:true},{id:'G-006',nom:'Cedro',on:false},
-  {id:'G-007',nom:'Helecho',on:true},{id:'G-008',nom:'Mango',on:true},{id:'G-009',nom:'Caucho',on:false},
+  {id:'G-001',nom:'Bambú',on:true},{id:'G-002',nom:'Cacao',on:true},{id:'G-003',nom:'Guadua',on:true},
+  {id:'G-004',nom:'Palma',on:true},{id:'G-005',nom:'Roble',on:true},{id:'G-006',nom:'Cedro',on:true},
+  {id:'G-007',nom:'Helecho',on:true},{id:'G-008',nom:'Mango',on:true},{id:'G-009',nom:'Caucho',on:true},
   {id:'G-010',nom:'Yarumo',on:true},{id:'G-011',nom:'Nogal',on:true},{id:'G-012',nom:'Laurel',on:true},
-  {id:'G-013',nom:'Orquídea',on:false},{id:'G-014',nom:'Moriche',on:true},{id:'G-015',nom:'Aliso',on:true},
+  {id:'G-013',nom:'Orquídea',on:true},{id:'G-014',nom:'Moriche',on:true},{id:'G-015',nom:'Aliso',on:true},
   {id:'TEST-01',nom:'🧪 Prueba Admin',on:true,test:true},
 ];
 let selIdx=-1;
@@ -4215,15 +4228,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v55';
-const APP_VERSION_NUM = '55.0';
+const APP_VERSION     = 'v58';
+const APP_VERSION_NUM = '58.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20260914-2300';
+const BUILD_ID = '20261002-2200';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4274,27 +4287,12 @@ try{
 // Guarda (o actualiza) el estado de un guardián/adopción en Supabase.
 // No hace nada si Supabase no está configurado — nunca rompe el flujo local.
 async function guardarAdopcionEnSupabase(datos){
-  if(!supabaseClient) return;
-  try{
-    const { error } = await supabaseClient.from('guardianes').upsert({
-      id:               datos.id,
-      nombre:           datos.nombre,
-      estado:           'adoptado',
-      nombre_adoptante: datos.nombreAdoptante,
-      email_adoptante:  datos.emailAdoptante,
-      telefono:         datos.telefono || null,
-      direccion:        datos.direccion || null,
-      cedula:           datos.cedula || null,
-      clave:            datos.clave || null,
-      monto_pagado:     datos.montoPagado,
-      mes_pagado:       datos.mesPagado,
-      tx_id:            datos.txId,
-      actualizado_en:   new Date().toISOString(),
-    });
-    if(error) console.warn('Supabase: no se pudo guardar la adopción —', error.message);
-  }catch(e){
-    console.warn('Supabase: error de red al guardar la adopción —', e);
-  }
+  // v57: el público ya no escribe en Supabase. Las adopciones reales las
+  // registra el servidor (registrar-intencion / wompi-webhook). Aquí solo
+  // llega el admin (p. ej. al importar un respaldo JSON).
+  if(!adminAuth || !SUPABASE_CONFIGURADO || !datos || !/^G-\d{3}$/.test(String(datos.id||''))) return;
+  try{ await llamarFuncionAdmin('guardar_guardian', {datos}); }
+  catch(e){ console.warn('Supabase: no se pudo guardar el guardián —', e.message||e); }
 }
 
 // ── CARGAR ADOPTANTES REALES DESDE SUPABASE — MÉTODO DE RESPALDO (v54) ──
@@ -4450,13 +4448,13 @@ function filaAdoptanteParaSupabase(a){
 // Guarda TODA la planilla actual en Supabase (upsert masivo, por cédula).
 // Público (anon key) y acotado por políticas CHECK — no expone lectura.
 async function sincronizarAdoptantesConSupabase(){
-  if(!supabaseClient) return;
+  // v57: solo el admin, y a través del servidor (la escritura pública se cerró)
+  if(!adminAuth || !SUPABASE_CONFIGURADO) return;
   try{
-    const filas = adoptantes.filter(a=>a.cc).map(filaAdoptanteParaSupabase);
+    const filas = adoptantes.filter(a=>a.cc && !ADOPTANTES_PRUEBA.includes(a.nom)).map(filaAdoptanteParaSupabase);
     if(filas.length===0) return;
-    const { error } = await supabaseClient.from('adoptantes').upsert(filas, {onConflict:'cc'});
-    if(error) console.warn('Supabase: no se pudo sincronizar la planilla de adoptantes —', error.message);
-  }catch(e){ console.warn('Supabase: error de red sincronizando adoptantes —', e); }
+    await llamarFuncionAdmin('guardar_adoptantes', {filas});
+  }catch(e){ console.warn('Supabase: no se pudo sincronizar la planilla de adoptantes —', e.message||e); }
 }
 
 async function eliminarAdoptanteDeSupabase(cc){
@@ -4521,10 +4519,242 @@ async function sincronizarTodoManualmente(){
     await sincronizarAdoptantesConSupabase();
     const cfg = JSON.parse(localStorage.getItem('escondida_config')||'{}');
     await guardarConfigEnSupabase(cfg);
+    await cargarFinanzasDesdeServidor(); // v57: sube y descarga cuotas y contabilidad
     showNotif('✅ Sincronización completa — este navegador ahora es la fuente de verdad en Supabase.');
   }catch(e){
     showNotif('⚠️ Falló la sincronización: '+(e.message||e));
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// v56 — DISPONIBILIDAD DE GUARDIANES Y CONFIGURACIÓN DESDE SUPABASE
+// ═══════════════════════════════════════════════════════════════════
+// Antes (v55) la galería pública leía la disponibilidad de la lista LDATA
+// escrita dentro de index.html: cada adopción obligaba a editar el archivo
+// en GitHub. Ahora la fuente de verdad es la tabla `guardianes` de Supabase
+// (columnas id/estado, que ya son de lectura pública y no contienen datos
+// personales). Un guardián con fila en `guardianes` y estado distinto de
+// 'disponible' se muestra como NO disponible para todos los visitantes.
+let disponibilidadCargada = false;
+
+async function cargarDisponibilidadDesdeSupabase(){
+  if(!supabaseClient) return false;
+  try{
+    const { data, error } = await supabaseClient.from('guardianes').select('id,estado');
+    if(error){ console.warn('Supabase: no se pudo leer disponibilidad —', error.message); return false; }
+    const noDisp = new Set((data||[]).filter(r=>r.estado && r.estado!=='disponible').map(r=>r.id));
+    LDATA.forEach(l=>{ if(!l.test) l.on = !noDisp.has(l.id); });
+    disponibilidadCargada = true;
+    // Si el visitante tenía seleccionado un guardián que ya no está disponible, soltarlo
+    if(selIdx>=0 && LDATA[selIdx] && !LDATA[selIdx].on){
+      selIdx=-1;
+      const el=document.getElementById('sel-guardian'); if(el) el.textContent='Ninguno';
+    }
+    renderLechones();
+    if(adminAuth){ renderAdmLechones(); renderAdmDash(); }
+    return true;
+  }catch(e){ console.warn('Supabase: error de red leyendo disponibilidad —', e); return false; }
+}
+
+// Precios y parámetros financieros para TODOS los visitantes (config_sitio
+// es de lectura pública). Así un cambio de precio hecho en Admin → Config
+// llega a todos sin exportar ni subir el HTML. Si el enlace trae parámetros
+// propios del dashboard (?lechon=...), se respetan los del enlace.
+async function cargarConfigPublicaDesdeSupabase(){
+  if(!supabaseClient) return false;
+  try{
+    if(new URLSearchParams(location.search).has('lechon')) return false;
+    const ok = await cargarConfigDesdeSupabase();
+    if(ok){
+      restaurarDesdeLocalStorage();
+      recalc();
+      set('btn-precio', fmt(calcular().primerPago));
+    }
+    return ok;
+  }catch(e){ console.warn('Supabase: no se pudo aplicar la configuración pública —', e); return false; }
+}
+
+async function sincronizarPublicoDesdeSupabase(){
+  await cargarConfigPublicaDesdeSupabase();      // puede restaurar LDATA local…
+  await cargarDisponibilidadDesdeSupabase();     // …por eso la disponibilidad va después
+}
+
+// Marca un guardián como disponible / no disponible para todos (solo admin,
+// verificado en el servidor con la contraseña real).
+async function cambiarDisponibilidadEnServidor(id, nombre, disponible){
+  if(!SUPABASE_CONFIGURADO || !adminAuth) return false;
+  try{
+    await llamarFuncionAdmin('estado_guardian', { id:String(id), nombre:String(nombre||''), disponible:!!disponible });
+    return true;
+  }catch(e){
+    console.warn('Supabase: no se pudo cambiar la disponibilidad —', e.message||e);
+    showNotif('⚠️ No se pudo guardar en Supabase: '+(e.message||e)+' — el cambio solo quedó en este navegador.');
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v56 — PAGOS MANUALES (Nequi, PSE, PayPal, Efectivo) POR VERIFICAR
+// ═══════════════════════════════════════════════════════════════════
+function requiereVerificacionManual(met){
+  return met!=='wom' && !esModoDemo();
+}
+
+// Deshace el "pagado" que onAdopcionConfirmada() acaba de registrar para ese
+// mes y lo deja pendiente de verificación (no cuenta como recaudado).
+function marcarPagoPorVerificar(adoptante, mes, metLabel, payVals, reference){
+  const r = registroPagos.find(x=>x.adoptante===adoptante.nom && x.mes===mes);
+  if(r){
+    r.pagado = 0; r.saldo = r.monto; r.fechaPago = null; r.estado = 'pendiente';
+    if(Array.isArray(r.historial) && r.historial.length) r.historial.pop();
+  }
+  // Quitar el ingreso contable recién creado para este adoptante
+  for(let i=libroContable.length-1;i>=0;i--){
+    if(libroContable[i].adoptante===adoptante.nom && (libroContable[i].ingreso||0)>0){ libroContable.splice(i,1); break; }
+  }
+  adoptante.est = 'verif';
+  adoptante.verif = { mes, reference: reference||null, metodo: metLabel, comprobante: (payVals||[]).filter(Boolean).join(' · ').slice(0,200), fecha: new Date().toISOString().slice(0,10) };
+  guardarAdoptantesLocalStorage();
+  if(adminAuth){ renderPlanilla(); renderAdmDash(); }
+}
+
+// Admin confirmó que el dinero llegó
+async function verificarPagoManual(nom){
+  const a = adoptantes.find(x=>x.nom===nom); if(!a) return;
+  const v = a.verif || { mes: a.mesPagado||1, metodo: 'Manual' };
+  const info = 'Adoptante: '+a.nom+'\nCuota: Mes '+v.mes+'\nMétodo: '+(v.metodo||'—')+(v.comprobante?'\nComprobante: '+v.comprobante:'')
+    +'\n\n¿Confirmas que el dinero YA está en tu cuenta (o en tu mano)?';
+  if(!confirm(info)) return;
+  try{
+    if(v.reference){
+      // v57: el servidor aplica el pago (cuota + contabilidad + adoptante)
+      const r = await llamarFuncionAdmin('verificar_intencion', {reference: v.reference});
+      if(r.conflicto) showNotif('⚠️ Pago registrado, pero ese guardián ya tenía otro adoptante. Revísalo.');
+    } else {
+      // Pagos marcados por verificar antes de v57 (sin referencia en el servidor)
+      const reg = registroPagos.find(x=>x.adoptante===a.nom && x.mes===v.mes);
+      const monto = reg ? reg.saldo : 0;
+      if(!a.cc || !monto) throw new Error('Este adoptante no tiene cédula o la cuota ya no tiene saldo.');
+      await llamarFuncionAdmin('registrar_pago', {cc:a.cc, mes:v.mes, monto, metodo:v.metodo||'Manual'});
+    }
+    a.est = 'ok'; delete a.verif;
+    await cargarFinanzasDesdeServidor();
+    showNotif('✅ Pago de '+a.nom+' verificado y guardado en Supabase.');
+  }catch(e){
+    showNotif('⚠️ No se pudo verificar en Supabase: '+(e.message||e)+'. Intenta de nuevo.');
+  }
+}
+
+// Admin confirmó que el dinero NO llegó
+async function rechazarPagoManual(nom){
+  const a = adoptantes.find(x=>x.nom===nom); if(!a) return;
+  const v = a.verif || { mes: a.mesPagado||1 };
+  const esPrimera = v.mes===1;
+  const pregunta = esPrimera
+    ? 'El pago inicial de '+a.nom+' no llegó.\n\nSe BORRARÁ este adoptante y su guardián volverá a quedar disponible para todos. ¿Continuar?'
+    : 'El pago de la cuota '+v.mes+' de '+a.nom+' no llegó.\n\nLa cuota quedará como pendiente de pago. ¿Continuar?';
+  if(!confirm(pregunta)) return;
+  try{
+    if(v.reference) await llamarFuncionAdmin('rechazar_intencion', {reference: v.reference});
+  }catch(e){
+    if(!/procesado/.test(e.message||'')){ showNotif('⚠️ No se pudo rechazar en Supabase: '+(e.message||e)); return; }
+  }
+  if(esPrimera){
+    confirmarBorrarAdoptante(a.nom, a.txId); // también libera el guardián
+    showNotif('🗑️ Adopción de '+nom+' anulada y guardián liberado.');
+  } else {
+    a.est = 'pend'; delete a.verif;
+    guardarAdoptantesLocalStorage();
+    renderPlanilla(); renderAdmDash();
+    showNotif('⚠️ Cuota '+v.mes+' de '+a.nom+' marcada como pendiente.');
+  }
+  cargarDisponibilidadDesdeSupabase();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v57 — CUOTAS Y CONTABILIDAD DESDE EL SERVIDOR
+// ═══════════════════════════════════════════════════════════════════
+// Supabase (tablas cuotas, libro_contable, intenciones_pago) es la fuente de
+// verdad. Al iniciar sesión, el panel: (1) sube una sola vez lo que este
+// navegador tenía guardado de versiones anteriores (seguro de repetir: el
+// servidor ignora lo que ya existe), (2) descarga cuotas, libro y pagos por
+// verificar, y (3) reconstruye las pestañas Pagos y Contabilidad.
+function _hashTexto(t){ // cyrb53 — identificador estable para asientos antiguos
+  let h1=0xdeadbeef, h2=0x41c6ce57;
+  for(let i=0;i<t.length;i++){ const c=t.charCodeAt(i); h1=Math.imul(h1^c,2654435761); h2=Math.imul(h2^c,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);
+}
+const _isoFecha = f => { if(!f) return null; if(/^\d{4}-\d{2}-\d{2}/.test(f)) return String(f).slice(0,10);
+  const m = String(f).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` : null; };
+
+async function subirFinanzasLocales(){
+  const ccDe = nom => (adoptantes.find(a=>a.nom===nom)||{}).cc;
+  const esPrueba = nom => ADOPTANTES_PRUEBA.includes(nom);
+  const cuotas = registroPagos.filter(r=>!esPrueba(r.adoptante) && ccDe(r.adoptante) && !String(r.guardian||'').includes('TEST')).map(r=>({
+    cc: ccDe(r.adoptante), mes: r.mes, concepto: r.concepto, monto: r.monto, pagado: r.pagado, saldo: r.saldo,
+    fecha_vence: _isoFecha(r.fechaVence), fecha_pago: _isoFecha(r.fechaPago), estado: r.estado,
+    historial: r.historial||[], reference: r.txId||null,
+  }));
+  const libro = libroContable.filter(m=>!m._noSubir && !esPrueba(m.adoptante) && !String(m.concepto||'').includes('TEST')).map(m=>({
+    id: m.id || ('L-'+_hashTexto([m.fecha,m.concepto,m.adoptante,m.ingreso,m.egreso,m.tipo].join('|'))),
+    fecha: _isoFecha(m.fecha), cc: ccDe(m.adoptante)||null, adoptante: m.adoptante, concepto: m.concepto,
+    ingreso: m.ingreso||0, egreso: m.egreso||0, tipo: m.tipo, reference: m.reference||null,
+  }));
+  if(!cuotas.length && !libro.length) return;
+  await llamarFuncionAdmin('importar_finanzas', {cuotas, libro});
+}
+
+async function cargarFinanzasDesdeServidor(){
+  if(!adminAuth || !SUPABASE_CONFIGURADO) return false;
+  try{
+    await subirFinanzasLocales().catch(e=>console.warn('No se pudieron subir las finanzas locales —', e.message||e));
+    const d = await llamarFuncionAdmin('leer_finanzas', {});
+    const porCC = {}; adoptantes.forEach(a=>{ if(a.cc) porCC[String(a.cc)] = a; });
+    const ccsServidor = new Set((d.cuotas||[]).map(c=>String(c.cc)));
+    // Cuotas: las del servidor reemplazan a las locales de esas cédulas
+    const locales = registroPagos.filter(r=>{ const a = adoptantes.find(x=>x.nom===r.adoptante); return !(a && a.cc && ccsServidor.has(String(a.cc))); });
+    const delServidor = (d.cuotas||[]).filter(c=>porCC[String(c.cc)]).map(c=>{ const a = porCC[String(c.cc)];
+      return { adoptante:a.nom, email:a.email||'', tel:a.tel||'', guardian:a.gdn||'—', mes:c.mes, concepto:c.concepto,
+        monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
+        estado:c.estado||'pendiente', historial:Array.isArray(c.historial)?c.historial:[], txId:c.reference||a.txId||'', cc:c.cc }; });
+    registroPagos.length = 0; registroPagos.push(...locales, ...delServidor);
+    // Libro: el del servidor (más asientos locales de adoptantes sin cédula)
+    if((d.libro||[]).length){
+      // los asientos antiguos ya se subieron; solo quedan locales los de esta sesión de adoptantes sin cédula
+      const sinCC = libroContable.filter(m=>{ const a = adoptantes.find(x=>x.nom===m.adoptante); return m._noSubir && !(a && a.cc); });
+      libroContable.length = 0;
+      libroContable.push(...sinCC, ...(d.libro||[]).map(m=>({ id:m.id, fecha:m.fecha, concepto:m.concepto,
+        adoptante: m.adoptante || (porCC[String(m.cc)]||{}).nom || '—', ingreso:m.ingreso||0, egreso:m.egreso||0, tipo:m.tipo, reference:m.reference })));
+    }
+    // Pagos manuales por verificar (visibles desde cualquier dispositivo)
+    (d.intenciones||[]).filter(x=>x.estado==='pendiente' && x.metodo!=='wom').forEach(x=>{
+      const a = porCC[String(x.cc)]; if(!a) return;
+      const lbl = {neq:'Nequi',pse:'PSE / Transferencia',pal:'PayPal',efe:'Efectivo'}[x.metodo]||x.metodo;
+      a.est = 'verif'; a.verif = { mes:x.mes, reference:x.reference, metodo:lbl, comprobante:x.comprobante||'', fecha:String(x.creado_en||'').slice(0,10) };
+    });
+    // Alertas: montos que no cuadran o guardián con doble adoptante
+    const alertas = (d.intenciones||[]).filter(x=>x.estado==='monto_incorrecto'||x.estado==='aprobado_conflicto');
+    if(alertas.length) setTimeout(()=>showNotif('🚨 '+alertas.length+' pago(s) Wompi requieren revisión (monto distinto o guardián ya adoptado). Ver Supabase → intenciones_pago.'), 6000);
+    try{
+      localStorage.setItem('escondida_adoptantes', JSON.stringify(adoptantes));
+      localStorage.setItem('escondida_registro_pagos', JSON.stringify(registroPagos));
+      localStorage.setItem('escondida_libro_contable', JSON.stringify(libroContable));
+    }catch(e){}
+    renderPlanilla(); renderAdmDash(); try{ renderTabPagos(); renderContabilidad(); }catch(e){}
+    return true;
+  }catch(e){
+    console.warn('Supabase: no se pudieron cargar las finanzas —', e.message||e);
+    showNotif('⚠️ No se pudieron cargar cuotas y contabilidad desde Supabase: '+(e.message||e));
+    return false;
+  }
+}
+
+function avisarPagosPorVerificar(){
+  const n = adoptantes.filter(a=>a.est==='verif').length;
+  if(n>0) setTimeout(()=>showNotif('🕓 Tienes '+n+' pago(s) por verificar en 👥 Adoptantes.'), 3500);
 }
 
 // ═══ ALERTAS DE PAGOS RECHAZADOS (Wompi) ═══════════════════════════
@@ -5041,8 +5271,13 @@ function procesarPago(met){
       );
     }
 
-    const amountCents = Math.round(montoPagado * 100);
-    obtenerFirmaWompi(txId, amountCents, 'COP').then(signature=>{
+    // v57: la intención de pago se registra en el servidor, que calcula el
+    // monto y firma ESE monto. Si Wompi aprueba, el servidor registra la
+    // adopción aunque el adoptante cierre esta página.
+    registrarIntencionPago({ reference: txId, metodo: 'wom', mes: mesPagado, payVals: _payVals }).then(r=>{
+      const signature = r.signature;
+      const amountCents = r.amount_in_cents;
+      if(typeof ctxPago!=='undefined' && ctxPago){ ctxPago.montoPagado = r.monto; }
       const wompiUrl = WOMPI_CHECKOUT_URL
         + '?public-key='        + encodeURIComponent(WOMPI_PUBLIC_KEY)
         + '&currency=COP'
@@ -5057,9 +5292,10 @@ function procesarPago(met){
         showNotif('⚠️ Permite popups en tu navegador o usa el link: ' + wompiUrl);
       }
     }).catch(err=>{
-      console.error('Error generando firma de pago Wompi:', err);
+      console.error('Error registrando el pago Wompi:', err);
       if(ventanaWompi && !ventanaWompi.closed) ventanaWompi.close();
-      showNotif('⚠️ No se pudo conectar con la pasarela de pago. Intenta de nuevo en unos segundos.');
+      window._pagoCancelado = txId; // detiene la espera de confirmación
+      mostrarErrorPago(err.message || 'No se pudo conectar con la pasarela de pago. Intenta de nuevo en unos segundos.');
     });
 
     showNotif('🔒 Redirigiendo a Wompi para completar el pago...');
@@ -5109,7 +5345,54 @@ function procesarPago(met){
     {t:2000, msg:'✅ Autorizando transacción...'}
   ];
   steps.forEach(s=>setTimeout(()=>{if(btn)btn.textContent=s.msg;},s.t));
-  setTimeout(()=>finalizarPagoExitoso(ctxPago), 2800);
+  if(esModoDemo()){ setTimeout(()=>finalizarPagoExitoso(ctxPago), 2800); return; }
+  // v57: pago manual real → se registra en el servidor (reserva el guardián
+  // y deja el pago "Por verificar"). Si el servidor no responde, NO se
+  // muestra éxito: el adoptante puede reintentar.
+  const inicio = Date.now();
+  registrarIntencionPago({ reference: txId, metodo: met, mes: mesPagado, payVals: _payVals }).then(r=>{
+    ctxPago.montoPagado = r.monto;
+    setTimeout(()=>finalizarPagoExitoso(ctxPago), Math.max(0, 2800-(Date.now()-inicio)));
+  }).catch(err=>{
+    if(ventanaRecibo && !ventanaRecibo.closed) ventanaRecibo.close();
+    mostrarErrorPago(err.message || 'No pudimos registrar tu pago. Intenta de nuevo.');
+  });
+}
+
+// v57: registra la intención de pago en el servidor (netlify/functions/registrar-intencion)
+async function registrarIntencionPago({reference, metodo, mes, payVals}){
+  const gdn = selIdx>=0 ? LDATA[selIdx] : null;
+  const ccForm = (document.getElementById('a-cc')?.value||'').replace(/\D/g,'');
+  const ccEfe  = metodo==='efe' ? String((payVals||[])[1]||'').replace(/\D/g,'') : '';
+  const cuerpo = {
+    reference, metodo, mes,
+    cc:  ccForm || ccEfe,
+    nom: document.getElementById('a-nom')?.value || (metodo==='efe' ? (payVals||[])[0] : '') || '',
+    email: document.getElementById('a-ema')?.value || '',
+    tel: document.getElementById('a-tel')?.value || '',
+    ciu: document.getElementById('a-ciu')?.value || '',
+    guardian_id: gdn ? gdn.id : '', guardian_nombre: gdn ? gdn.nom : '',
+    comprobante: metodo==='wom' ? '' : (payVals||[]).filter(Boolean).join(' · '),
+  };
+  // v58: desde el portal (otro dispositivo) el navegador no tiene la cédula;
+  // el servidor la toma de la cuenta verificada con correo + clave.
+  if(window._portalSesion && mes>1){ cuerpo.portal_email = window._portalSesion.email; cuerpo.portal_pin = window._portalSesion.pin; }
+  const resp = await fetch('/.netlify/functions/registrar-intencion', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cuerpo),
+  });
+  const datos = await resp.json().catch(()=>({}));
+  if(!resp.ok) throw new Error(datos.error || ('Error del servidor ('+resp.status+')'));
+  return datos;
+}
+
+function mostrarErrorPago(msg){
+  const btn = document.querySelector('.btn-pay');
+  if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='Reintentar'; }
+  showNotif('⚠️ '+msg);
+  const errDiv = document.getElementById('pago-modal-err');
+  if(errDiv){ errDiv.textContent='⚠️ '+msg; errDiv.style.display='block'; }
+  // Si el guardián ya no está libre, refrescar la galería
+  if(/guardián/i.test(msg)) cargarDisponibilidadDesdeSupabase();
 }
 
 // Se ejecuta SOLO cuando un pago queda confirmado (de inmediato para
@@ -5130,6 +5413,15 @@ function finalizarPagoExitoso(ctx){
   const _cc  = (met==='efe') ? (_payVals[1]||'—') : '—';
   const _telEfe = (met==='efe') ? (_payVals[2]||tel) : tel;
   window._pagoDatos = {nom, eml, tel:_telEfe, cc:_cc, ciu, gdn, C, txId, met, metLabel, hoy, montoPagado, mesPagado, conceptoPagado};
+
+  // v56: encabezado distinto cuando el pago debe verificarse a mano
+  const _pendV = requiereVerificacionManual(met);
+  const _h3 = document.querySelector('#pexito-detalle h3');
+  const _p  = document.querySelector('#pexito-detalle h3 + p');
+  if(_h3) _h3.textContent = _pendV ? '¡Adopción registrada!' : '¡Pago Confirmado!';
+  if(_p)  _p.textContent  = _pendV
+    ? 'Tu guardián quedó reservado a tu nombre. Verificaremos tu pago ('+metLabel+') y te confirmaremos por WhatsApp o correo.'
+    : 'Tu guardián ha sido adoptado. Guarda los datos de esta transacción.';
 
   // Llenar desglose del pago
   const des=document.getElementById('pago-desglose');
@@ -5215,6 +5507,13 @@ function finalizarPagoExitoso(ctx){
   // Inicializar sistema de pagos y contabilidad
   onAdopcionConfirmada(nuevoAdoptante);
 
+  // v56: Nequi / PSE / PayPal / Efectivo NO tienen confirmación automática.
+  // El guardián queda RESERVADO, pero el pago queda "Por verificar" (sin
+  // contarse como recaudado) hasta que el administrador confirme el dinero.
+  if(requiereVerificacionManual(met)){
+    marcarPagoPorVerificar(nuevoAdoptante, mesPagado, metLabel, _payVals, txId);
+  }
+
   // Actualizar la URL del navegador con el resultado de la adopción/pago,
   // y guardar el estado en Supabase si está configurado (persistencia real,
   // funciona incluso si se abre el enlace en otro navegador/dispositivo).
@@ -5259,6 +5558,7 @@ function iniciarEsperaConfirmacionWompi(txId, ctx){
   const maxIntentos = 40; // 40 × 3s = 120 segundos de espera máxima
 
   const chequear = async () => {
+    if(window._pagoCancelado === txId) return; // v57: el registro del pago falló
     intentos++;
     const btn = document.querySelector('.btn-pay');
     if(btn) btn.textContent = '⏳ Esperando confirmación de Wompi... ('+intentos+')';
@@ -5703,8 +6003,10 @@ async function verifyCfg(){
     actualizarHuellaVerificacion();
     verificarAdoptantesHuerfanosAlAbrir();
     verificarPagosRechazados(true);
-    cargarAdoptantesDesdeSupabase();
-    cargarConfigDesdeSupabase().then(ok=>{ if(ok){ restaurarDesdeLocalStorage(); renderAdmDash(); } });
+    cargarConfigDesdeSupabase().then(ok=>{ if(ok){ restaurarDesdeLocalStorage(); renderAdmDash(); } })
+      .then(()=>cargarAdoptantesDesdeSupabase())     // planilla (después de restaurar, para no pisarla)
+      .then(()=>cargarFinanzasDesdeServidor())       // v57: cuotas, contabilidad, por verificar
+      .then(()=>{ cargarDisponibilidadDesdeSupabase(); avisarPagosPorVerificar(); });
     showNotif('✅ Sesión de administración iniciada.');
   } else {
     // ❌ Clave incorrecta
@@ -5799,10 +6101,10 @@ function cerrarSesionAdmin(){
 function renderAdmDash(){
   const total=adoptantes.length;
   const aldia=adoptantes.filter(a=>a.est==='ok'||a.est==='compl').length;
-  const alerta=adoptantes.filter(a=>a.est==='alerta'||a.est==='pend').length;
+  const alerta=adoptantes.filter(a=>a.est==='alerta'||a.est==='pend'||a.est==='verif').length;
   const inv=adoptantes.reduce((s,a)=>s+a.inv,0);
   // Sincronizar LDATA con adoptantes — marcar como adoptado si hay adoptante con ese guardián
-  LDATA.forEach(l=>{
+  if(!disponibilidadCargada) LDATA.forEach(l=>{ // v56: si Supabase ya respondió, manda Supabase
     if(l.test) return;
     const adoptado = adoptantes.some(a=>
       a.gdn && (a.gdn.includes(l.nom) || a.gdn.includes(l.id))
@@ -5912,13 +6214,22 @@ function ejecutarBorrarGuardian(id){
   showNotif(`🗑️ Guardián "${nom}" eliminado.`);
 }
 
-function toggleLechon(id){
+async function toggleLechon(id){
   if(!adminAuth){showNotif('Solo administradores.');return;}
   const l = LDATA.find(x=>x.id===id);
   if(!l) return;
-  l.on = !l.on;
+  const nuevoOn = !l.on;
+  // Al LIBERAR un guardián que tiene un adoptante activo, pedir confirmación
+  if(nuevoOn && !l.test){
+    const ad = adoptantes.find(a=>(a.gdn||'').split(' ').pop()===id && a.est!=='compl');
+    if(ad && !confirm('El guardián '+l.nom+' ('+id+') está asignado a '+ad.nom+'.\n\n¿Liberarlo para que otra persona pueda adoptarlo?')) return;
+  }
+  l.on = nuevoOn;
   guardarEstadoGuardianes();
   renderAdmLechones();renderLechones();renderAdmDash();
+  if(l.test) return; // TEST-01 nunca se guarda en Supabase
+  const ok = await cambiarDisponibilidadEnServidor(id, l.nom, nuevoOn);
+  if(ok) showNotif((nuevoOn?'✅ ':'🔒 ')+l.nom+' ahora está '+(nuevoOn?'DISPONIBLE':'NO disponible')+' para todos los visitantes.');
 }
 // ═══════════════════════════════════════════════════
 // SISTEMA DE CONFIGURACIÓN PERSISTENTE
@@ -6012,7 +6323,7 @@ function guardarEstadoGuardianes(){
 
 function guardarAdoptantesLocalStorage(){
   try{
-    localStorage.setItem('escondida_adoptantes',    JSON.stringify(adoptantes));
+    localStorage.setItem('escondida_adoptantes',    JSON.stringify(adoptantes.filter(a=>!a._portal))); // v58: lo del portal no se guarda en este dispositivo
     localStorage.setItem('escondida_registro_pagos',JSON.stringify(registroPagos));
     localStorage.setItem('escondida_libro_contable',JSON.stringify(libroContable));
   }catch(e){ console.warn('No se pudo guardar adoptantes:', e); }
@@ -6178,7 +6489,7 @@ function restaurarDesdeLocalStorage(){
     // Actualizar vistas si hay datos restaurados
     if(adoptantes.length > 0){
       // Sincronizar LDATA con adoptantes restaurados
-      adoptantes.forEach(a=>{
+      if(!disponibilidadCargada) adoptantes.forEach(a=>{
         if(!a.gdn) return;
         const gdn = LDATA.find(l=>a.gdn.includes(l.nom)||a.gdn.includes(l.id));
         if(gdn && !gdn.test) gdn.on = false;
@@ -6620,13 +6931,10 @@ SECCIÓN G — DATOS BANCARIOS Y LEGALES
 }
 
 // ═══ PLANILLA ═══
-let adoptantes=[
-  {nom:'Carlos Ramírez',email:'carlos@gmail.com',tel:'+57 312 555 0101',ciu:'Bogotá, Cundinamarca',gdn:'Bambú G-001',inv:950000,ret:1268500,mes:'Mes 3/5',est:'ok',fecha:diasAtras(65),cc:'12345678',pin:'5678'},
-  {nom:'María López',email:'maria@hotmail.com',tel:'+57 300 555 0102',ciu:'Medellín, Antioquia',gdn:'Cacao G-002',inv:950000,ret:1268500,mes:'Mes 2/5',est:'pend',fecha:diasAtras(38),cc:'87654321',pin:'4321'},
-  {nom:'Andrés Torres',email:'andres@empresa.co',tel:'+57 315 555 0103',ciu:'Cali, Valle del Cauca',gdn:'Palma G-004',inv:950000,ret:1268500,mes:'Mes 5/5',est:'compl',fecha:diasAtras(140),cc:'11223344',pin:'3344'},
-  {nom:'Sandra Gómez',email:'sandra@gmail.com',tel:'+57 320 555 0104',ciu:'Pacho, Cundinamarca',gdn:'Roble G-005',inv:950000,ret:1268500,mes:'Mes 1/5',est:'alerta',fecha:diasAtras(10),cc:'99887766',pin:'7766'},
-  {nom:'Felipe Vargas',email:'felipe@corp.co',tel:'+57 301 555 0105',ciu:'Barranquilla, Atlántico',gdn:'Yarumo G-010',inv:950000,ret:1268500,mes:'Mes 4/5',est:'ok',fecha:diasAtras(112),cc:'55443322',pin:'3322'},
-];
+// v56: la plantilla ya NO trae los 5 adoptantes de demostración. Antes se
+// cargaban en el navegador de cada visitante, bloqueaban en silencio a
+// Bambú, Cacao, Palma, Roble y Yarumo, y se subían a Supabase al sincronizar.
+let adoptantes=[];
 function renderPlanilla(){
   const el=document.getElementById('plan-tbody');if(!el)return;
   const fil=(document.getElementById('plan-fil')?.value||'').toLowerCase();
@@ -6636,8 +6944,8 @@ function renderPlanilla(){
     const me=filEst==='todos'||a.est===filEst;
     return mn&&me;
   });
-  const estLbl={ok:'✅ Al día',pend:'⚠️ Pendiente',alerta:'🔴 Vencido',compl:'🎉 Completado'};
-  const estBg={ok:'rgba(82,183,136,.08)',pend:'rgba(212,168,67,.06)',alerta:'rgba(224,112,112,.08)',compl:'rgba(82,183,136,.05)'};
+  const estLbl={ok:'✅ Al día',pend:'⚠️ Pendiente',alerta:'🔴 Vencido',compl:'🎉 Completado',verif:'🕓 Por verificar'};
+  const estBg={ok:'rgba(82,183,136,.08)',pend:'rgba(212,168,67,.06)',alerta:'rgba(224,112,112,.08)',compl:'rgba(82,183,136,.05)',verif:'rgba(123,106,255,.10)'};
   el.innerHTML=datos.map(a=>{
     const nomSeg = escapeHtml(a.nom);
     const emlSeg = escapeHtml(a.email);
@@ -6684,7 +6992,14 @@ function renderPlanilla(){
             width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:.68rem;display:flex;align-items:center;justify-content:center;">🔄</button>
         </div>
       </td>
-      <td style="padding:10px 8px;text-align:center;display:flex;gap:5px;justify-content:center;">
+      <td style="padding:10px 8px;text-align:center;display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
+        ${a.est==='verif' ? `
+        <button onclick="verificarPagoManual('${nomSeg}')" title="Ya confirmé el dinero en mi cuenta"
+          style="background:rgba(82,183,136,.18);border:1px solid rgba(82,183,136,.45);
+          color:#52b788;padding:3px 8px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;">✅ Verificar</button>
+        <button onclick="rechazarPagoManual('${nomSeg}')" title="El dinero no llegó"
+          style="background:rgba(224,112,112,.1);border:1px solid rgba(224,112,112,.3);
+          color:#e07070;padding:3px 8px;border-radius:6px;font-size:.65rem;cursor:pointer;">❌ No llegó</button>` : ''}
         <button onclick="cambiarEstado('${nomSeg}')"
           style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
           color:rgba(255,255,255,.5);padding:3px 10px;border-radius:6px;font-size:.65rem;cursor:pointer;">
@@ -6846,6 +7161,12 @@ function confirmarEdicionCC(nom){
     showNotif('⚠️ La cédula debe tener entre 6 y 12 dígitos.');
     return;
   }
+  const ccAnterior = a.cc;
+  if(ccAnterior && ccAnterior!==val && adminAuth){
+    llamarFuncionAdmin('cambiar_cc', {anterior:String(ccAnterior), nueva:val})
+      .then(()=>cargarFinanzasDesdeServidor())
+      .catch(e=>showNotif('⚠️ No se pudo mover la cédula en Supabase: '+(e.message||e)));
+  }
   a.cc = val;
   if(sync) a.pin = val.slice(-4);
 
@@ -6936,6 +7257,7 @@ function cambiarEstado(nom){
   const lbl={ok:'Al día',pend:'Pendiente',alerta:'Vencido',compl:'Completado'};
   const nuevo=estados[(estados.indexOf(a.est)+1)%estados.length];
   a.est=nuevo;renderPlanilla();renderAdmDash();
+  guardarAdoptantesLocalStorage(); // v56: antes este cambio se perdía al recargar
   showNotif(`${nom} → ${lbl[nuevo]}`);
 }
 
@@ -6979,7 +7301,13 @@ function confirmarBorrarAdoptante(nom, txId){
   if(registro?.gdn){
     const gdnId = registro.gdn.split(' ').pop(); // último token = ID (ej. G-006)
     const g = LDATA.find(l=>l.id===gdnId && !l.test);
-    if(g){ g.on = true; }
+    // v56: liberar también en Supabase, salvo que sea un adoptante de prueba
+    // u otro adoptante de la planilla tenga asignado ese mismo guardián.
+    const otroConMismoGdn = adoptantes.some(a=>a!==registro && (a.gdn||'').split(' ').pop()===gdnId);
+    if(g){
+      g.on = true;
+      if(!otroConMismoGdn && !ADOPTANTES_PRUEBA.includes(nom)) cambiarDisponibilidadEnServidor(g.id, g.nom, true);
+    }
     guardarEstadoGuardianes();
   }
 
@@ -7571,28 +7899,58 @@ function actualizarIndicadoresChat(){
 
 
 // ═══ LOGIN ADOPTANTE ═══
-function loginAdoptante(){
+async function loginAdoptante(){
   const email = (document.getElementById('adopt-login-email')?.value||'').trim().toLowerCase();
   const pwd   = (document.getElementById('adopt-login-pwd')?.value||'').trim();
   const errEl = document.getElementById('adoptante-err');
-  if(!email||!pwd){
-    if(errEl){errEl.textContent='Ingresa tu email y clave.';errEl.style.display='block';}
-    return;
-  }
+  const err = t => { if(errEl){ errEl.textContent=t; errEl.style.display='block'; } };
+  if(!email||!pwd){ err('Ingresa tu email y clave.'); return; }
+  if(errEl) errEl.style.display='none';
+
+  // v58: primero el servidor — funciona desde cualquier dispositivo
+  let errorServidor = null;
+  try{
+    const resp = await fetch('/.netlify/functions/portal-adoptante', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, pin:pwd}),
+    });
+    const d = await resp.json().catch(()=>({}));
+    if(resp.ok && d.ok){
+      const a = aplicarDatosPortal(d, email, pwd);
+      renderPanelAdoptante(a);
+      return;
+    }
+    errorServidor = { status: resp.status, msg: d.error };
+  }catch(e){ errorServidor = { status: 0, msg: null }; }
+
+  // Respaldo: datos guardados en este mismo navegador (sin conexión, o versiones anteriores)
   const a = adoptantes.find(x=>(x.email||'').toLowerCase()===email);
-  if(!a){
-    if(errEl){errEl.textContent='❌ Email no encontrado.';errEl.style.display='block';}
+  const pinOk = a ? (a.pin || (a.cc||'').replace(/\D/g,'').slice(-4)) : null;
+  if(a && pinOk && pwd === pinOk && (!errorServidor || errorServidor.status===0 || errorServidor.status>=500)){
+    _asegurarPagosAdoptante(a);
+    renderPanelAdoptante(a);
     return;
   }
-  // PIN válido: guardado al confirmar adopción | últimos 4 dígitos de cc | '1234' solo para demo sin cc
-  const pinOk = a.pin || (a.cc||'').replace(/\D/g,'').slice(-4) || '1234';
-  if(pwd === pinOk){
-    if(errEl) errEl.style.display='none';
-    _asegurarPagosAdoptante(a);   // garantiza registroPagos para este adoptante
-    renderPanelAdoptante(a);
-  } else {
-    if(errEl){errEl.textContent='❌ Clave incorrecta. Usa los últimos 4 dígitos de tu cédula.';errEl.style.display='block';}
-  }
+  err('❌ '+(errorServidor && errorServidor.msg ? errorServidor.msg : 'Correo o clave incorrectos. Tu clave son los últimos 4 dígitos de tu cédula.'));
+}
+
+// v58: carga en memoria los datos que devolvió el servidor para este adoptante
+function aplicarDatosPortal(d, email, pin){
+  const s = d.adoptante;
+  window._portalSesion = { email, pin, nom: s.nom };
+  let a = adoptantes.find(x=>(x.email||'').toLowerCase()===email);
+  const datos = { nom:s.nom, email:s.email||email, tel:s.tel||'', ciu:s.ciu||'', gdn:s.gdn||'—', inv:s.inv||0, ret:s.ret||0,
+    mes:s.mes||'Mes 1/5', est:s.est||'ok', fecha:s.fecha||'', txId:s.tx_id||'', ccMask:s.cc_mask||'' };
+  if(a){ Object.assign(a, datos); } else { a = { ...datos, cc:'', _portal:true }; adoptantes.push(a); }
+  // Cuotas: las del servidor reemplazan a las locales de este adoptante
+  const otras = registroPagos.filter(r=>r.adoptante!==a.nom);
+  const mias = (d.cuotas||[]).map(c=>({ adoptante:a.nom, email:a.email, tel:a.tel, guardian:a.gdn, mes:c.mes,
+    concepto:c.concepto, monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
+    estado:c.estado||'pendiente', historial:[], txId:c.reference||a.txId||'' }));
+  registroPagos.length = 0; registroPagos.push(...otras, ...mias);
+  if(!mias.length) _asegurarPagosAdoptante(a);
+  const pv = (d.por_verificar||[])[0];
+  if(pv){ a.est = 'verif'; a.verifMes = pv.mes; }
+  return a;
 }
 
 // Genera registroPagos si el adoptante no los tiene aún (adoptantes demo o restaurados)
@@ -7627,9 +7985,9 @@ function renderPanelAdoptante(a){
   if(loginSec)loginSec.style.display='none';
   if(!panelSec)return;
   panelSec.style.display='block';
-  const estLbl={ok:'Al día',pend:'Pendiente pago',alerta:'Pago vencido',compl:'Ciclo completado'};
-  const estIco={ok:'✅',pend:'⚠️',alerta:'🔴',compl:'🎉'};
-  const estCol={ok:'#52b788',pend:'#d4a843',alerta:'#e07070',compl:'#95d5b2'};
+  const estLbl={ok:'Al día',pend:'Pendiente pago',alerta:'Pago vencido',compl:'Ciclo completado',verif:'Pago en verificación'};
+  const estIco={ok:'✅',pend:'⚠️',alerta:'🔴',compl:'🎉',verif:'🕓'};
+  const estCol={ok:'#52b788',pend:'#d4a843',alerta:'#e07070',compl:'#95d5b2',verif:'#a89aff'};
   const partes=a.mes.split('/');
   const mesAct=parseInt(partes[0].replace('Mes ',''))||1;
   const mesTot=parseInt(partes[1])||5;
@@ -7826,6 +8184,13 @@ function cerrarModalPagarCuota(){
 }
 
 function cerrarSesionAdoptante(){
+  // v58: no dejar los datos de este adoptante en este dispositivo
+  if(window._portalSesion){
+    const nom = window._portalSesion.nom;
+    for(let i=adoptantes.length-1;i>=0;i--){ if(adoptantes[i]._portal && adoptantes[i].nom===nom) adoptantes.splice(i,1); }
+    if(!adoptantes.some(a=>a.nom===nom)){ for(let i=registroPagos.length-1;i>=0;i--){ if(registroPagos[i].adoptante===nom) registroPagos.splice(i,1); } }
+    window._portalSesion = null;
+  }
   const loginSec=document.getElementById('adoptante-login-section');
   const panelSec=document.getElementById('adoptante-panel-section');
   if(loginSec)loginSec.style.display='block';
@@ -8385,6 +8750,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   pasoInit('render-lechones', ()=>{
     renderLechones();
+    sincronizarPublicoDesdeSupabase(); // v56: disponibilidad y precios reales
     const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='none';
   });
 
