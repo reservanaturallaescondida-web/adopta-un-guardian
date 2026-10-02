@@ -8,6 +8,12 @@
 // Esto es lo que permite distinguir un pago REALMENTE confirmado por Wompi
 // de uno que el navegador simplemente reportó como exitoso sin verificación.
 //
+// v57: además, cuando el pago queda APPROVED y el MONTO coincide con la
+// intención registrada por registrar-intencion.js, esta función registra la
+// adopción completa en Supabase (guardián, adoptante, cuota pagada y asiento
+// contable) — aunque el adoptante haya cerrado la página antes de tiempo.
+// Si Wompi rechaza el pago, la intención queda como "rechazado".
+//
 // Configuración requerida en el panel de Wompi:
 //   Developers → Webhooks/Eventos → URL:
 //   https://adopta-un-guardian.netlify.app/.netlify/functions/wompi-webhook
@@ -34,8 +40,9 @@
 //   (Supabase → Project Settings → API → "service_role" secret key — NUNCA
 //   la publiques ni la pongas en el HTML del sitio).
 const crypto = require('crypto');
+const F = require('../lib/finanzas'); // v57: registra la adopción en el servidor
 
-const SUPABASE_URL = 'https://rbryttidysmkkjmmsezj.supabase.co';
+const SUPABASE_URL = process.env.SUPABASE_URL_OVERRIDE || 'https://rbryttidysmkkjmmsezj.supabase.co';
 
 // Resuelve una ruta tipo "transaction.id" dentro del objeto data del webhook
 function resolverRuta(obj, ruta){
@@ -133,6 +140,30 @@ exports.handler = async (event) => {
     }
   } catch (e) {
     console.error('Error de red al guardar en Supabase:', e);
+  }
+
+  // ── v57: procesar la intención de pago asociada a esta referencia ──
+  try {
+    const intencion = await F.leerIntencion(reference);
+    if (intencion && intencion.estado === 'pendiente') {
+      if (status === 'APPROVED') {
+        const esperado = Number(intencion.monto) * 100;
+        if (Number(amount_in_cents) !== esperado) {
+          console.error('Monto pagado distinto al esperado — NO se registra la adopción.', { reference, amount_in_cents, esperado });
+          await F.actualizar(`intenciones_pago?reference=eq.${F.q(reference)}&estado=eq.pendiente`, { estado: 'monto_incorrecto', procesado_en: new Date().toISOString() });
+        } else {
+          const r = await F.aprobarIntencion(reference, { metodoLabel: 'Wompi', via: 'wompi' });
+          if (r.conflicto) console.warn('Pago aprobado, pero el guardián ya tenía otro adoptante:', reference);
+        }
+      } else if (['DECLINED', 'ERROR', 'VOIDED'].includes(status)) {
+        await F.rechazarIntencion(reference);
+      }
+    }
+  } catch (e) {
+    console.error('Error procesando la intención de pago:', reference, e);
+    // 500 → Wompi reintentará el aviso más tarde (la transacción ya quedó
+    // guardada arriba y el procesamiento es seguro de repetir).
+    return { statusCode: 500, body: JSON.stringify({ error: 'Error procesando el pago; se reintentará.' }) };
   }
 
   return {
