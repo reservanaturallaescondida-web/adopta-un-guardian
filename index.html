@@ -2336,6 +2336,7 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
       <div id="adm-pagos-rechazados-box" style="background:rgba(224,112,112,.05);border:1px solid rgba(224,112,112,.2);border-radius:12px;padding:14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;">
           <h4 style="font-size:.78rem;color:#e07070;text-transform:uppercase;letter-spacing:.1em;margin:0;">⚠️ Pagos Rechazados (Wompi · últimos 30 días)</h4>
+          <button onclick="refrescarPanelDesdeServidor(true)" title="Traer los datos más recientes del servidor" style="background:rgba(82,183,136,.12);border:1px solid rgba(82,183,136,.3);color:#52b788;padding:4px 10px;border-radius:6px;font-size:.7rem;cursor:pointer;margin-left:8px;">🔄 Actualizar panel</button>
           <button onclick="verificarPagosRechazados(false)" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);border-radius:6px;padding:4px 10px;font-size:.65rem;cursor:pointer;">🔄 Actualizar</button>
         </div>
         <div id="adm-pagos-rechazados" style="font-size:.8rem;">
@@ -4228,15 +4229,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v58';
-const APP_VERSION_NUM = '58.0';
+const APP_VERSION     = 'v59';
+const APP_VERSION_NUM = '59.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20261002-2200';
+const BUILD_ID = '20261015-1200';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4715,7 +4716,10 @@ async function cargarFinanzasDesdeServidor(){
     const porCC = {}; adoptantes.forEach(a=>{ if(a.cc) porCC[String(a.cc)] = a; });
     const ccsServidor = new Set((d.cuotas||[]).map(c=>String(c.cc)));
     // Cuotas: las del servidor reemplazan a las locales de esas cédulas
-    const locales = registroPagos.filter(r=>{ const a = adoptantes.find(x=>x.nom===r.adoptante); return !(a && a.cc && ccsServidor.has(String(a.cc))); });
+    // v59: solo se conservan filas locales de adoptantes que SIGUEN en la planilla y aún no
+    // están en el servidor. Las de personas que ya no existen (restos de versiones
+    // anteriores guardados en ese navegador) se descartan: así todos los equipos ven lo mismo.
+    const locales = registroPagos.filter(r=>{ const a = adoptantes.find(x=>x.nom===r.adoptante); return !!a && !(a.cc && ccsServidor.has(String(a.cc))); });
     const delServidor = (d.cuotas||[]).filter(c=>porCC[String(c.cc)]).map(c=>{ const a = porCC[String(c.cc)];
       return { adoptante:a.nom, email:a.email||'', tel:a.tel||'', guardian:a.gdn||'—', mes:c.mes, concepto:c.concepto,
         monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
@@ -4751,6 +4755,27 @@ async function cargarFinanzasDesdeServidor(){
     return false;
   }
 }
+
+// v59: varios administradores a la vez — el panel se refresca desde el servidor
+// cada 60 segundos mientras esté abierto, y con el botón 🔄 de la pestaña Pagos.
+let _refrescandoPanel = false;
+async function refrescarPanelDesdeServidor(manual){
+  if(!adminAuth || !SUPABASE_CONFIGURADO || _refrescandoPanel) return;
+  _refrescandoPanel = true;
+  try{
+    const ok = await cargarPlanillaCompletaDesdeSupabase();
+    if(ok){ renderPlanilla(); renderAdmDash(); }
+    await cargarFinanzasDesdeServidor();
+    await cargarDisponibilidadDesdeSupabase();
+    if(manual) showNotif('🔄 Panel actualizado desde el servidor.');
+  }catch(e){ console.warn('No se pudo refrescar el panel —', e.message||e); }
+  finally{ _refrescandoPanel = false; }
+}
+setInterval(()=>{
+  const abierto = document.getElementById('admin-overlay')?.classList.contains('open');
+  const editando = document.querySelector('[id^="modal-"]');   // no refrescar con una ventana de edición abierta
+  if(adminAuth && abierto && !editando && document.visibilityState==='visible') refrescarPanelDesdeServidor(false);
+}, 60000);
 
 function avisarPagosPorVerificar(){
   const n = adoptantes.filter(a=>a.est==='verif').length;
