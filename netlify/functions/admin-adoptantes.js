@@ -1,4 +1,4 @@
-// netlify/functions/admin-adoptantes.js
+// netlify/functions/admin-adoptantes.js  (v60: varias adopciones por persona)
 //
 // Función protegida para administrar la planilla de Adoptantes y la
 // configuración del sitio en Supabase — el único camino que puede LEER la
@@ -86,6 +86,23 @@ exports.handler = async (event) => {
     return { statusCode: 401, body: JSON.stringify({ error: 'Contraseña de administrador incorrecta.' }) };
   }
 
+  const ok = (obj) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, ...(obj || {}) }) });
+  const mal = (code, msg) => ({ statusCode: code, body: JSON.stringify({ error: msg }) });
+  const ccValida = (v) => /^\d{4,20}$/.test(String(v || ''));
+  const idValido = (v) => /^\d{4,20}(-G-\d{3})?$/.test(String(v || ''));
+  // v60: identifica UNA adopción. Usa body.id; si solo viene la cédula, sirve
+  // únicamente cuando esa persona tiene una sola adopción.
+  async function resolverId(b) {
+    if (b.id != null && b.id !== '') {
+      return idValido(b.id) ? { id: String(b.id) } : { code: 400, error: 'Identificador de adopción inválido.' };
+    }
+    if (!ccValida(b.cc)) return { code: 400, error: 'Falta el identificador de la adopción.' };
+    const lista = await F.leerAdopcionesDe(String(b.cc));
+    if (lista.length === 1) return { id: lista[0].id };
+    if (!lista.length) return { code: 404, error: 'Ese adoptante no está en Supabase (revise su cédula).' };
+    return { code: 409, error: 'Esta persona tiene varios guardianes: recargue el panel e intente de nuevo.' };
+  }
+
   try {
     if (accion === 'leer_adoptantes') {
       const resp = await supabaseFetch('adoptantes?select=*', { method: 'GET' });
@@ -99,12 +116,16 @@ exports.handler = async (event) => {
     }
 
     if (accion === 'borrar_adoptante') {
-      const { cc } = body;
-      if (!cc) return { statusCode: 400, body: JSON.stringify({ error: 'Falta la cédula (cc) del adoptante a borrar.' }) };
+      // v60: se borra UNA adopción (id = cédula-guardián); las otras adopciones
+      // de la misma persona no se tocan. Compatibilidad: si solo llega la cédula
+      // y esa persona tiene una sola adopción, se usa esa.
+      const r = await resolverId(body);
+      if (r.error) return mal(r.code, r.error);
+      const aid = r.id;
       // v57: también sus cuotas y asientos contables (quedan las intenciones como registro)
-      await F.borrar(`cuotas?cc=eq.${F.q(cc)}`).catch(e => console.warn('borrar cuotas:', e.message));
-      await F.borrar(`libro_contable?cc=eq.${F.q(cc)}`).catch(e => console.warn('borrar libro:', e.message));
-      const resp = await supabaseFetch(`adoptantes?cc=eq.${encodeURIComponent(cc)}`, { method: 'DELETE' });
+      await F.borrar(`cuotas?adopcion_id=eq.${F.q(aid)}`).catch(e => console.warn('borrar cuotas:', e.message));
+      await F.borrar(`libro_contable?adopcion_id=eq.${F.q(aid)}`).catch(e => console.warn('borrar libro:', e.message));
+      const resp = await supabaseFetch(`adoptantes?id=eq.${encodeURIComponent(aid)}`, { method: 'DELETE' });
       if (!resp.ok) {
         const texto = await resp.text().catch(() => '');
         console.error('Error al borrar adoptante:', resp.status, texto);
@@ -167,16 +188,13 @@ exports.handler = async (event) => {
     }
 
     // ═══════════ v57: finanzas en el servidor ═══════════
-    const ok = (obj) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, ...(obj || {}) }) });
-    const mal = (code, msg) => ({ statusCode: code, body: JSON.stringify({ error: msg }) });
-    const ccValida = (v) => /^\d{4,20}$/.test(String(v || ''));
 
     // Todo lo que el panel necesita: cuotas, libro contable, pagos por verificar y alertas
     if (accion === 'leer_finanzas') {
       const [cuotas, libro, intenciones] = await Promise.all([
-        F.leer('cuotas?select=*&order=cc.asc,mes.asc'),
+        F.leer('cuotas?select=*&order=adopcion_id.asc,mes.asc'),
         F.leer('libro_contable?select=*&order=fecha.asc,creado_en.asc'),
-        F.leer('intenciones_pago?select=reference,metodo,mes,monto,cc,nom,guardian_id,comprobante,estado,creado_en&estado=in.(pendiente,aprobado_conflicto,monto_incorrecto)&order=creado_en.desc&limit=500'),
+        F.leer('intenciones_pago?select=reference,metodo,mes,monto,cc,adopcion_id,nom,guardian_id,comprobante,estado,creado_en&estado=in.(pendiente,aprobado_conflicto,monto_incorrecto)&order=creado_en.desc&limit=500'),
       ]);
       return ok({ cuotas: cuotas || [], libro: libro || [], intenciones: intenciones || [] });
     }
@@ -186,8 +204,18 @@ exports.handler = async (event) => {
       const cuotas = Array.isArray(body.cuotas) ? body.cuotas.slice(0, 3000) : [];
       const libro = Array.isArray(body.libro) ? body.libro.slice(0, 5000) : [];
       const n = (v) => Math.max(0, Math.min(20000000, Math.round(Number(v) || 0)));
-      const filasC = cuotas.filter(c => ccValida(c.cc) && c.mes >= 1 && c.mes <= 24).map(c => ({
-        id: F.idCuota(String(c.cc), Number(c.mes)), cc: String(c.cc), mes: Number(c.mes),
+      // v60: cada cuota/asiento va a UNA adopción. Si el navegador no manda
+      // adopcion_id, se usa la única adopción de esa cédula (si tiene varias, se omite).
+      const todas = (await F.leer('adoptantes?select=id,cc')) || [];
+      const porCc = {};
+      todas.forEach(a => { (porCc[String(a.cc)] = porCc[String(a.cc)] || []).push(String(a.id)); });
+      const aidDe = (x) => {
+        if (x.adopcion_id && idValido(x.adopcion_id) && todas.some(a => String(a.id) === String(x.adopcion_id))) return String(x.adopcion_id);
+        const l = porCc[String(x.cc)] || [];
+        return l.length === 1 ? l[0] : null;
+      };
+      const filasC = cuotas.filter(c => ccValida(c.cc) && c.mes >= 1 && c.mes <= 24 && aidDe(c)).map(c => ({
+        id: F.idCuota(aidDe(c), Number(c.mes)), adopcion_id: aidDe(c), cc: String(c.cc), mes: Number(c.mes),
         concepto: String(c.concepto || '').slice(0, 120), monto: n(c.monto), pagado: n(c.pagado), saldo: n(c.saldo),
         fecha_vence: /^\d{4}-\d{2}-\d{2}$/.test(c.fecha_vence || '') ? c.fecha_vence : null,
         fecha_pago: /^\d{4}-\d{2}-\d{2}$/.test(c.fecha_pago || '') ? c.fecha_pago : null,
@@ -196,7 +224,7 @@ exports.handler = async (event) => {
       }));
       const filasL = libro.filter(l => l.id && /^[A-Za-z0-9_-]{3,80}$/.test(l.id)).map(l => ({
         id: l.id, fecha: /^\d{4}-\d{2}-\d{2}$/.test(l.fecha || '') ? l.fecha : F.hoyISO(),
-        cc: ccValida(l.cc) ? String(l.cc) : null, adoptante: String(l.adoptante || '').slice(0, 120) || null,
+        cc: ccValida(l.cc) ? String(l.cc) : null, adopcion_id: ccValida(l.cc) ? aidDe(l) : null, adoptante: String(l.adoptante || '').slice(0, 120) || null,
         concepto: String(l.concepto || '').slice(0, 200), ingreso: n(l.ingreso), egreso: n(l.egreso),
         tipo: String(l.tipo || '').slice(0, 40), reference: l.reference ? String(l.reference).slice(0, 64) : null,
       }));
@@ -225,26 +253,54 @@ exports.handler = async (event) => {
 
     // Pago registrado a mano por el admin (pestaña Pagos → Registrar pago)
     if (accion === 'registrar_pago') {
-      const cc = String(body.cc || ''); const mes = parseInt(body.mes, 10); const monto = Math.round(Number(body.monto) || 0);
-      if (!ccValida(cc) || !(mes >= 1 && mes <= 24) || !(monto >= 1000 && monto <= 20000000)) return mal(400, 'Datos de pago inválidos.');
-      const ad = await F.leerAdoptante(cc);
-      if (!ad) return mal(404, 'Ese adoptante no está en Supabase (revise su cédula).');
+      const mes = parseInt(body.mes, 10); const monto = Math.round(Number(body.monto) || 0);
+      if (!(mes >= 1 && mes <= 24) || !(monto >= 1000 && monto <= 20000000)) return mal(400, 'Datos de pago inválidos.');
+      const r = await resolverId(body);
+      if (r.error) return mal(r.code, r.error);
+      const ad = await F.leerAdopcion(r.id);
+      if (!ad) return mal(404, 'Esa adopción no está en Supabase (recargue el panel).');
+      const aid = String(ad.id); const cc = String(ad.cc);
       const C = F.calcular(await F.leerConfig());
-      await F.asegurarCalendario(cc, C, null, mes);
+      await F.asegurarCalendario(aid, cc, C, null, mes);
       const libroId = `P-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
-      await F.aplicarPagoCuota({ cc, mes, monto, metodo: String(body.metodo || 'Efectivo').slice(0, 30), reference: libroId, libroId, adoptanteNom: ad.nom, gdn: ad.gdn });
-      const prog = await F.resumenProgreso(cc, C.meses);
-      await F.upsert('adoptantes', [{ cc, mes: prog.mes, est: prog.completo ? 'compl' : (ad.est === 'verif' ? 'verif' : 'ok'), actualizado_en: new Date().toISOString() }]);
+      await F.aplicarPagoCuota({ aid, cc, mes, monto, metodo: String(body.metodo || 'Efectivo').slice(0, 30), reference: libroId, libroId, adoptanteNom: ad.nom, gdn: ad.gdn });
+      const prog = await F.resumenProgreso(aid, C.meses);
+      await F.actualizar(`adoptantes?id=eq.${F.q(aid)}`, { mes: prog.mes, est: prog.completo ? 'compl' : (ad.est === 'verif' ? 'verif' : 'ok'), actualizado_en: new Date().toISOString() });
       return ok();
     }
 
     // Guardar filas de la planilla editadas por el admin (reemplaza la escritura pública de v55/v56)
     if (accion === 'guardar_adoptantes') {
+      // v60: cada fila es UNA adopción; su llave es id = cédula-guardián
+      const idDeFila = (f) => {
+        if (f.id && idValido(f.id) && String(f.id).split('-')[0] === String(f.cc)) return String(f.id);
+        const gid = F.gidDe(f.gdn);
+        return gid ? F.idAdopcion(String(f.cc), gid) : String(f.cc);
+      };
       const filas = (Array.isArray(body.filas) ? body.filas : []).slice(0, 2000).filter(f => ccValida(f.cc)).map(f => ({
-        cc: String(f.cc), nom: f.nom ?? null, email: f.email ?? null, tel: f.tel ?? null, ciu: f.ciu ?? null, gdn: f.gdn ?? null,
+        id: idDeFila(f), cc: String(f.cc), nom: f.nom ?? null, email: f.email ?? null, tel: f.tel ?? null, ciu: f.ciu ?? null, gdn: f.gdn ?? null,
         inv: f.inv ?? null, ret: f.ret ?? null, mes: f.mes ?? null, est: f.est ?? null, fecha: f.fecha ?? null, pin: f.pin ?? null,
         tx_id: f.tx_id ?? null, actualizado_en: new Date().toISOString(),
       }));
+      // v60: el progreso (mes) y "Ciclo completado" salen de las cuotas del SERVIDOR,
+      // no de la copia del navegador (una copia vieja ya no puede retroceder a nadie).
+      if (filas.length) {
+        const ids = [...new Set(filas.map(f => f.id))];
+        const cuotasSrv = [];
+        for (let k = 0; k < ids.length; k += 100) {
+          const lote = ids.slice(k, k + 100).map(x => `"${String(x).replace(/"/g, '')}"`).join(',');
+          cuotasSrv.push(...((await F.leer(`cuotas?adopcion_id=in.(${encodeURIComponent(lote)})&select=adopcion_id,mes,saldo`)) || []));
+        }
+        filas.forEach(f => {
+          const cs = cuotasSrv.filter(c => c.adopcion_id === f.id);
+          if (!cs.length) return;
+          const pagadas = cs.filter(c => c.saldo <= 0).map(c => c.mes);
+          const total = Math.max(cs.length, ...cs.map(c => c.mes));
+          f.mes = `Mes ${pagadas.length ? Math.max(...pagadas) : 1}/${total}`;
+          if (pagadas.length >= total) f.est = f.est === 'verif' ? 'verif' : 'compl';
+          else if (f.est === 'compl') f.est = 'ok';
+        });
+      }
       if (filas.length) await F.upsert('adoptantes', filas);
       return ok({ guardadas: filas.length });
     }
@@ -253,16 +309,20 @@ exports.handler = async (event) => {
     if (accion === 'cambiar_cc') {
       const ant = String(body.anterior || ''); const nue = String(body.nueva || '');
       if (!ccValida(ant) || !ccValida(nue) || ant === nue) return mal(400, 'Cédulas inválidas.');
-      const viejo = await F.leerAdoptante(ant);
-      if (viejo) {
-        const yaNueva = await F.leerAdoptante(nue);
-        if (!yaNueva) await F.upsert('adoptantes', [{ ...viejo, cc: nue, actualizado_en: new Date().toISOString() }]);
-        await F.borrar(`adoptantes?cc=eq.${F.q(ant)}`);
-      }
-      const cuotas = await F.leerCuotas(ant);
-      if (cuotas.length) {
-        await F.upsert('cuotas', cuotas.map(c => ({ ...c, id: F.idCuota(nue, c.mes), cc: nue })), true);
-        await F.borrar(`cuotas?cc=eq.${F.q(ant)}`);
+      // v60: se mueven TODAS las adopciones de esa persona (id = cédula-guardián)
+      const nuevoId = (id) => String(id) === ant ? nue : (String(id).startsWith(ant + '-') ? nue + String(id).slice(ant.length) : String(id));
+      const adopciones = await F.leerAdopcionesDe(ant);
+      for (const a of adopciones) {
+        const aidV = String(a.id); const aidN = nuevoId(aidV);
+        if (!(await F.leerAdopcion(aidN))) await F.upsert('adoptantes', [{ ...a, id: aidN, cc: nue, actualizado_en: new Date().toISOString() }]);
+        const cuotas = await F.leerCuotas(aidV);
+        if (cuotas.length) {
+          await F.upsert('cuotas', cuotas.map(c => ({ ...c, id: F.idCuota(aidN, c.mes), adopcion_id: aidN, cc: nue })), true);
+          await F.borrar(`cuotas?adopcion_id=eq.${F.q(aidV)}`);
+        }
+        await F.actualizar(`libro_contable?adopcion_id=eq.${F.q(aidV)}`, { adopcion_id: aidN });
+        await F.actualizar(`intenciones_pago?adopcion_id=eq.${F.q(aidV)}`, { adopcion_id: aidN });
+        await F.borrar(`adoptantes?id=eq.${F.q(aidV)}`);
       }
       await F.actualizar(`libro_contable?cc=eq.${F.q(ant)}`, { cc: nue });
       await F.actualizar(`intenciones_pago?cc=eq.${F.q(ant)}`, { cc: nue });
