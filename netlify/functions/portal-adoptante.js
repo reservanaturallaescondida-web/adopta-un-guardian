@@ -1,4 +1,4 @@
-// netlify/functions/portal-adoptante.js  (v58)
+// netlify/functions/portal-adoptante.js  (v58, v60: varias adopciones por persona)
 //
 // Portal del adoptante desde CUALQUIER dispositivo. El adoptante entra con su
 // correo y su clave (últimos 4 dígitos de la cédula). Esta función verifica
@@ -18,23 +18,36 @@ exports.handler = async (event) => {
   try { b = JSON.parse(event.body || '{}'); } catch (e) { return resp(400, { error: 'JSON inválido.' }); }
   try {
     const a = await F.verificarAccesoPortal(b.email, b.pin);
-    const [cuotas, pendientes] = await Promise.all([
-      F.leerCuotas(a.cc),
-      F.leer(`intenciones_pago?cc=eq.${F.q(a.cc)}&estado=eq.pendiente&metodo=neq.wom&select=mes,metodo,creado_en`),
-    ]);
     const cc = String(a.cc || '');
+    // v60: una persona puede tener varios guardianes → se devuelven TODAS sus adopciones
+    const [lista, pendientes] = await Promise.all([
+      F.leerAdopcionesDe(cc),
+      F.leer(`intenciones_pago?cc=eq.${F.q(cc)}&estado=eq.pendiente&metodo=neq.wom&select=mes,metodo,creado_en,guardian_id,adopcion_id`),
+    ]);
+    const adopciones = await Promise.all((lista.length ? lista : [a]).map(async (x) => {
+      const aid = x.id || F.idAdopcion(cc, F.gidDe(x.gdn));
+      const gid = F.gidDe(x.gdn);
+      const cuotas = await F.leerCuotas(aid);
+      return {
+        adopcion: {
+          nom: x.nom, email: x.email, tel: x.tel, ciu: x.ciu, gdn: x.gdn, gid, inv: x.inv, ret: x.ret,
+          mes: x.mes, est: x.est, fecha: x.fecha, tx_id: x.tx_id, cc_mask: cc ? '••••' + cc.slice(-4) : '',
+        },
+        cuotas: (cuotas || []).map((c) => ({
+          mes: c.mes, concepto: c.concepto, monto: c.monto, pagado: c.pagado, saldo: c.saldo,
+          fecha_vence: c.fecha_vence, fecha_pago: c.fecha_pago, estado: c.estado, reference: c.reference,
+        })),
+        por_verificar: (pendientes || []).filter((p) => (p.adopcion_id || F.idAdopcion(cc, p.guardian_id)) === aid)
+          .map((p) => ({ mes: p.mes, metodo: p.metodo, creado_en: p.creado_en })),
+      };
+    }));
+    const primera = adopciones[0];
     return resp(200, {
       ok: true,
-      adoptante: {
-        nom: a.nom, email: a.email, tel: a.tel, ciu: a.ciu, gdn: a.gdn, inv: a.inv, ret: a.ret,
-        mes: a.mes, est: a.est, fecha: a.fecha, tx_id: a.tx_id,
-        cc_mask: cc ? '••••' + cc.slice(-4) : '',
-      },
-      cuotas: (cuotas || []).map((c) => ({
-        mes: c.mes, concepto: c.concepto, monto: c.monto, pagado: c.pagado, saldo: c.saldo,
-        fecha_vence: c.fecha_vence, fecha_pago: c.fecha_pago, estado: c.estado, reference: c.reference,
-      })),
-      por_verificar: pendientes || [],
+      adoptante: primera.adopcion,          // compatibilidad con v58/v59
+      cuotas: primera.cuotas,
+      por_verificar: primera.por_verificar,
+      adopciones,
     });
   } catch (e) {
     if (e.status && e.status < 500) return resp(e.status, { error: e.message });
