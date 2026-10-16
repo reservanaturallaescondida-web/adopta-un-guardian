@@ -1255,6 +1255,7 @@ footer a{color:var(--vl);text-decoration:none;}
     <div class="adp-form" id="adp-form">
       <h3>🌿 Registra Tu Adopción</h3>
       <p class="sub">Campos marcados con * son obligatorios.</p>
+      <div id="ya-guardian-box" style="background:rgba(82,183,136,.06);border:1px solid rgba(82,183,136,.22);border-radius:10px;padding:11px 13px;margin-bottom:14px;"></div>
       <div class="fr">
         <div class="ff"><label>Nombre Completo *</label><input type="text" id="a-nom" placeholder="Tu nombre completo"></div>
         <div class="ff"><label>Cédula de Ciudadanía *</label><input type="text" id="a-cc" placeholder="Número de cédula" inputmode="numeric" onkeypress="return /\d/.test(event.key)"></div>
@@ -3249,7 +3250,7 @@ function confirmarPagoParcial(idx){
   // v57: registrar también en el servidor (fuente de verdad) y refrescar
   const _ad = adoptantes.find(x=>x.nom===r.adoptante);
   if(adminAuth && SUPABASE_CONFIGURADO && _ad && _ad.cc){
-    llamarFuncionAdmin('registrar_pago', {cc:_ad.cc, mes:r.mes, monto, metodo:met})
+    llamarFuncionAdmin('registrar_pago', {id:idAdopcionDe(_ad), cc:_ad.cc, mes:r.mes, monto, metodo:met})
       .then(()=>cargarFinanzasDesdeServidor())
       .catch(e=>showNotif('⚠️ El pago quedó solo en este navegador: '+(e.message||e)));
   } else if(adminAuth){
@@ -3907,11 +3908,12 @@ function adpGo(n){
     const eml=document.getElementById('a-ema')?.value.trim();
     const tel=document.getElementById('a-tel')?.value.trim();
     const errEl=document.getElementById('ferr');
-    if(!nom||!cc||!eml||!tel){
+    const ccVerificada = !!window._portalSesion && !cc;   // v60: la pone el servidor
+    if(!nom||(!cc&&!ccVerificada)||!eml||!tel){
       if(errEl){errEl.textContent='Por favor complete Nombre, Cédula, Email y Teléfono.';errEl.style.display='block';}
       return;
     }
-    if(!/^\d{5,12}$/.test(cc.replace(/\s/g,''))){
+    if(!ccVerificada && !/^\d{5,12}$/.test(cc.replace(/\s/g,''))){
       if(errEl){errEl.textContent='Ingresa un número de cédula válido (5–12 dígitos).';errEl.style.display='block';}
       return;
     }
@@ -3977,7 +3979,10 @@ function renderAdpResumen(){
   // Selector de cuota — qué concepto está pagando el adoptante
   const cuotaActual = (() => {
     // Detectar si ya tiene pagos previos para saber en qué mes está
-    const adopt = adoptantes.find(a => a.nom === (document.getElementById('a-nom')?.value||''));
+    // v60: solo cuenta una adopción previa del MISMO guardián (otro guardián empieza en Mes 1)
+    const _nomF = document.getElementById('a-nom')?.value||'';
+    const _gid  = selIdx>=0 && LDATA[selIdx] ? LDATA[selIdx].id : null;
+    const adopt = adoptantes.find(a => (nombreRealDe(a)===_nomF || a.nom===_nomF) && gidDeTexto(a.gdn)===_gid);
     if(adopt){
       const pagos = registroPagos.filter(r => r.adoptante === adopt.nom && r.saldo > 0);
       if(pagos.length > 0) return pagos[0].mes;
@@ -4229,15 +4234,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v59';
-const APP_VERSION_NUM = '59.0';
+const APP_VERSION     = 'v60';
+const APP_VERSION_NUM = '60.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20261015-1200';
+const BUILD_ID = '20261015-1800';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4428,10 +4433,29 @@ async function llamarFuncionAdmin(accion, payload){
   return datos;
 }
 
+// v60: una persona puede adoptar varios guardianes. Cada adopción es una fila
+// con id = '<cédula>-<guardián>'. En el panel, si una cédula tiene varias
+// adopciones, el nombre se muestra con el guardián: "Ana Pérez (Palma)".
+const gidDeTexto = t => (String(t||'').match(/G-\d{3}/)||[null])[0];
+const nombreGuardianDe = gdn => String(gdn||'').replace(/\s*G-\d{3}\s*/,'').trim() || gidDeTexto(gdn) || 'Guardián';
+const idAdopcionDe = a => a.id || (a.cc && gidDeTexto(a.gdn) ? String(a.cc)+'-'+gidDeTexto(a.gdn) : (a.cc ? String(a.cc) : ''));
+const nombreRealDe = a => (a._sufijo && String(a.nom||'').endsWith(a._sufijo)) ? String(a.nom).slice(0, -a._sufijo.length) : a.nom;
+function aplicarNombresVisibles(lista, claveGrupo){
+  const grupos = {};
+  lista.forEach(a=>{ const k = claveGrupo(a); if(k) (grupos[k] = grupos[k] || []).push(a); });
+  lista.forEach(a=>{
+    const real = nombreRealDe(a); const k = claveGrupo(a);
+    if(k && grupos[k].length>1){ a._sufijo = ' ('+nombreGuardianDe(a.gdn)+')'; a.nom = real + a._sufijo; }
+    else { delete a._sufijo; a.nom = real; }
+  });
+  return lista;
+}
+
 function filaAdoptanteParaSupabase(a){
   return {
+    id:     idAdopcionDe(a) || null,
     cc:     String(a.cc||'').trim(),
-    nom:    a.nom  ?? null,
+    nom:    nombreRealDe(a) ?? null,
     email:  a.email?? null,
     tel:    a.tel  ?? null,
     ciu:    a.ciu  ?? null,
@@ -4458,9 +4482,12 @@ async function sincronizarAdoptantesConSupabase(){
   }catch(e){ console.warn('Supabase: no se pudo sincronizar la planilla de adoptantes —', e.message||e); }
 }
 
-async function eliminarAdoptanteDeSupabase(cc){
+async function eliminarAdoptanteDeSupabase(a){
+  // v60: borra UNA adopción (id = cédula-guardián), no todas las de la persona
+  const cc = (a && typeof a==='object') ? a.cc : a;
+  const id = (a && typeof a==='object') ? idAdopcionDe(a) : '';
   if(!SUPABASE_CONFIGURADO || !cc) return;
-  try{ await llamarFuncionAdmin('borrar_adoptante', {cc:String(cc)}); }
+  try{ await llamarFuncionAdmin('borrar_adoptante', id ? {id:String(id), cc:String(cc)} : {cc:String(cc)}); }
   catch(e){ console.warn('Supabase: no se pudo borrar el adoptante —', e.message||e); }
 }
 
@@ -4474,10 +4501,10 @@ async function cargarPlanillaCompletaDesdeSupabase(){
     const datos = await llamarFuncionAdmin('leer_adoptantes', {});
     if(Array.isArray(datos.adoptantes) && datos.adoptantes.length>0){
       adoptantes.length = 0;
-      adoptantes.push(...datos.adoptantes.map(f=>({
-        cc:f.cc, nom:f.nom, email:f.email, tel:f.tel, ciu:f.ciu, gdn:f.gdn,
+      adoptantes.push(...aplicarNombresVisibles(datos.adoptantes.map(f=>({
+        id:f.id||null, cc:f.cc, nom:f.nom, email:f.email, tel:f.tel, ciu:f.ciu, gdn:f.gdn,
         inv:f.inv, ret:f.ret, mes:f.mes, est:f.est, fecha:f.fecha, pin:f.pin, txId:f.tx_id,
-      })));
+      })), a=>a.cc ? String(a.cc) : ''));
       try{ localStorage.setItem('escondida_adoptantes', JSON.stringify(adoptantes)); }catch(e){}
       return true;
     }
@@ -4637,7 +4664,7 @@ async function verificarPagoManual(nom){
       const reg = registroPagos.find(x=>x.adoptante===a.nom && x.mes===v.mes);
       const monto = reg ? reg.saldo : 0;
       if(!a.cc || !monto) throw new Error('Este adoptante no tiene cédula o la cuota ya no tiene saldo.');
-      await llamarFuncionAdmin('registrar_pago', {cc:a.cc, mes:v.mes, monto, metodo:v.metodo||'Manual'});
+      await llamarFuncionAdmin('registrar_pago', {id:idAdopcionDe(a), cc:a.cc, mes:v.mes, monto, metodo:v.metodo||'Manual'});
     }
     a.est = 'ok'; delete a.verif;
     await cargarFinanzasDesdeServidor();
@@ -4693,15 +4720,18 @@ const _isoFecha = f => { if(!f) return null; if(/^\d{4}-\d{2}-\d{2}/.test(f)) re
 
 async function subirFinanzasLocales(){
   const ccDe = nom => (adoptantes.find(a=>a.nom===nom)||{}).cc;
+  const aidDe = nom => { const a = adoptantes.find(x=>x.nom===nom); return a ? idAdopcionDe(a) : null; };
   const esPrueba = nom => ADOPTANTES_PRUEBA.includes(nom);
-  const cuotas = registroPagos.filter(r=>!esPrueba(r.adoptante) && ccDe(r.adoptante) && !String(r.guardian||'').includes('TEST')).map(r=>({
-    cc: ccDe(r.adoptante), mes: r.mes, concepto: r.concepto, monto: r.monto, pagado: r.pagado, saldo: r.saldo,
+  // v60: lo que vino del servidor no se vuelve a subir (si el admin lo borró en
+  // Supabase, un navegador con copia vieja no debe "revivirlo")
+  const cuotas = registroPagos.filter(r=>!r._srv && !esPrueba(r.adoptante) && ccDe(r.adoptante) && !String(r.guardian||'').includes('TEST')).map(r=>({
+    cc: ccDe(r.adoptante), adopcion_id: aidDe(r.adoptante), mes: r.mes, concepto: r.concepto, monto: r.monto, pagado: r.pagado, saldo: r.saldo,
     fecha_vence: _isoFecha(r.fechaVence), fecha_pago: _isoFecha(r.fechaPago), estado: r.estado,
     historial: r.historial||[], reference: r.txId||null,
   }));
-  const libro = libroContable.filter(m=>!m._noSubir && !esPrueba(m.adoptante) && !String(m.concepto||'').includes('TEST')).map(m=>({
+  const libro = libroContable.filter(m=>!m._noSubir && !m._srv && !/^(W|V|P|H)-/.test(String(m.id||'')) && !esPrueba(m.adoptante) && !String(m.concepto||'').includes('TEST')).map(m=>({
     id: m.id || ('L-'+_hashTexto([m.fecha,m.concepto,m.adoptante,m.ingreso,m.egreso,m.tipo].join('|'))),
-    fecha: _isoFecha(m.fecha), cc: ccDe(m.adoptante)||null, adoptante: m.adoptante, concepto: m.concepto,
+    fecha: _isoFecha(m.fecha), cc: ccDe(m.adoptante)||null, adopcion_id: aidDe(m.adoptante), adoptante: nombreRealDe(adoptantes.find(a=>a.nom===m.adoptante)||{nom:m.adoptante}), concepto: m.concepto,
     ingreso: m.ingreso||0, egreso: m.egreso||0, tipo: m.tipo, reference: m.reference||null,
   }));
   if(!cuotas.length && !libro.length) return;
@@ -4713,17 +4743,21 @@ async function cargarFinanzasDesdeServidor(){
   try{
     await subirFinanzasLocales().catch(e=>console.warn('No se pudieron subir las finanzas locales —', e.message||e));
     const d = await llamarFuncionAdmin('leer_finanzas', {});
-    const porCC = {}; adoptantes.forEach(a=>{ if(a.cc) porCC[String(a.cc)] = a; });
-    const ccsServidor = new Set((d.cuotas||[]).map(c=>String(c.cc)));
+    const porCC = {}; adoptantes.forEach(a=>{ if(a.cc && !porCC[String(a.cc)]) porCC[String(a.cc)] = a; });
+    // v60: cada cuota / asiento / pago pertenece a UNA adopción (adopcion_id = cédula-guardián)
+    const porId = {}; adoptantes.forEach(a=>{ const id = idAdopcionDe(a); if(id) porId[id] = a; });
+    const nPorCC = {}; adoptantes.forEach(a=>{ if(a.cc) nPorCC[String(a.cc)] = (nPorCC[String(a.cc)]||0)+1; });
+    const adDe = (aid, cc, gid) => porId[aid] || (gid && porId[String(cc)+'-'+gid]) || (nPorCC[String(cc)]===1 ? porCC[String(cc)] : null);
+    const ccsServidor = new Set((d.cuotas||[]).map(c=>String(c.adopcion_id||c.cc)));
     // Cuotas: las del servidor reemplazan a las locales de esas cédulas
     // v59: solo se conservan filas locales de adoptantes que SIGUEN en la planilla y aún no
     // están en el servidor. Las de personas que ya no existen (restos de versiones
     // anteriores guardados en ese navegador) se descartan: así todos los equipos ven lo mismo.
-    const locales = registroPagos.filter(r=>{ const a = adoptantes.find(x=>x.nom===r.adoptante); return !!a && !(a.cc && ccsServidor.has(String(a.cc))); });
-    const delServidor = (d.cuotas||[]).filter(c=>porCC[String(c.cc)]).map(c=>{ const a = porCC[String(c.cc)];
+    const locales = registroPagos.filter(r=>{ const a = adoptantes.find(x=>x.nom===r.adoptante); return !!a && !(a.cc && (ccsServidor.has(idAdopcionDe(a)) || ccsServidor.has(String(a.cc)))); });
+    const delServidor = (d.cuotas||[]).filter(c=>adDe(c.adopcion_id, c.cc)).map(c=>{ const a = adDe(c.adopcion_id, c.cc);
       return { adoptante:a.nom, email:a.email||'', tel:a.tel||'', guardian:a.gdn||'—', mes:c.mes, concepto:c.concepto,
         monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
-        estado:c.estado||'pendiente', historial:Array.isArray(c.historial)?c.historial:[], txId:c.reference||a.txId||'', cc:c.cc }; });
+        estado:c.estado||'pendiente', historial:Array.isArray(c.historial)?c.historial:[], txId:c.reference||a.txId||'', cc:c.cc, _srv:true }; });
     registroPagos.length = 0; registroPagos.push(...locales, ...delServidor);
     // Libro: el del servidor (más asientos locales de adoptantes sin cédula)
     if((d.libro||[]).length){
@@ -4731,11 +4765,11 @@ async function cargarFinanzasDesdeServidor(){
       const sinCC = libroContable.filter(m=>{ const a = adoptantes.find(x=>x.nom===m.adoptante); return m._noSubir && !(a && a.cc); });
       libroContable.length = 0;
       libroContable.push(...sinCC, ...(d.libro||[]).map(m=>({ id:m.id, fecha:m.fecha, concepto:m.concepto,
-        adoptante: m.adoptante || (porCC[String(m.cc)]||{}).nom || '—', ingreso:m.ingreso||0, egreso:m.egreso||0, tipo:m.tipo, reference:m.reference })));
+        adoptante: (adDe(m.adopcion_id, m.cc)||{}).nom || m.adoptante || '—', ingreso:m.ingreso||0, egreso:m.egreso||0, tipo:m.tipo, reference:m.reference, _srv:true })));
     }
     // Pagos manuales por verificar (visibles desde cualquier dispositivo)
     (d.intenciones||[]).filter(x=>x.estado==='pendiente' && x.metodo!=='wom').forEach(x=>{
-      const a = porCC[String(x.cc)]; if(!a) return;
+      const a = adDe(x.adopcion_id, x.cc, x.guardian_id); if(!a) return;
       const lbl = {neq:'Nequi',pse:'PSE / Transferencia',pal:'PayPal',efe:'Efectivo'}[x.metodo]||x.metodo;
       a.est = 'verif'; a.verif = { mes:x.mes, reference:x.reference, metodo:lbl, comprobante:x.comprobante||'', fecha:String(x.creado_en||'').slice(0,10) };
     });
@@ -5401,7 +5435,8 @@ async function registrarIntencionPago({reference, metodo, mes, payVals}){
   };
   // v58: desde el portal (otro dispositivo) el navegador no tiene la cédula;
   // el servidor la toma de la cuenta verificada con correo + clave.
-  if(window._portalSesion && mes>1){ cuerpo.portal_email = window._portalSesion.email; cuerpo.portal_pin = window._portalSesion.pin; }
+  // v60: también al adoptar OTRO guardián con los datos ya guardados.
+  if(window._portalSesion){ cuerpo.portal_email = window._portalSesion.email; cuerpo.portal_pin = window._portalSesion.pin; }
   const resp = await fetch('/.netlify/functions/registrar-intencion', {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cuerpo),
   });
@@ -5500,7 +5535,8 @@ function finalizarPagoExitoso(ctx){
   // en vez de crear una duplicada. Esto es lo que causaba que un mismo
   // adoptante apareciera dos veces al pagar una cuota 2-5.
   const _ccNew    = (document.getElementById('a-cc')?.value||'').replace(/[^0-9]/g,'');
-  const existente = eml ? adoptantes.find(a=>(a.email||'').toLowerCase()===eml.toLowerCase()) : null;
+  // v60: misma persona + MISMO guardián = pago de una cuota; otro guardián = adopción nueva
+  const existente = eml ? adoptantes.find(a=>(a.email||'').toLowerCase()===eml.toLowerCase() && gidDeTexto(a.gdn)===gdn.id) : null;
 
   let nuevoAdoptante;
   if(existente){
@@ -5515,9 +5551,11 @@ function finalizarPagoExitoso(ctx){
     if(_ccNew){ existente.cc = _ccNew; if(!existente.pin) existente.pin = _ccNew.slice(-4); }
     nuevoAdoptante = existente;
   } else {
+    const _otrasMias = eml ? adoptantes.filter(a=>(a.email||'').toLowerCase()===eml.toLowerCase()) : [];
     nuevoAdoptante = {
       nom, email:eml, tel, ciu,
       gdn:gdn.nom+' '+gdn.id,
+      _portal: !!window._portalSesion,
       inv:C.totalInv, ret:C.retorno,
       mes:'Mes '+mesPagado+'/'+C.meses, est:'ok',
       fecha:diasAtras(0), txId, met,
@@ -5525,7 +5563,15 @@ function finalizarPagoExitoso(ctx){
       cc:_ccNew,
       pin:_ccNew.slice(-4)
     };
+    if(_ccNew) nuevoAdoptante.id = _ccNew+'-'+gdn.id;
     adoptantes.unshift(nuevoAdoptante);
+    // v60: si esta persona ya tenía otro guardián, los nombres se distinguen por guardián
+    if(_otrasMias.length){
+      const viejos = _otrasMias.map(a=>a.nom);
+      aplicarNombresVisibles([nuevoAdoptante, ..._otrasMias], ()=>'misma');
+      _otrasMias.forEach((a,i)=>{ if(a.nom!==viejos[i]){ registroPagos.forEach(r=>{ if(r.adoptante===viejos[i]) r.adoptante=a.nom; }); libroContable.forEach(m=>{ if(m.adoptante===viejos[i]) m.adoptante=a.nom; }); } });
+      if(window._portalSesion) window._portalSesion.noms = [...new Set([...(window._portalSesion.noms||[]), nuevoAdoptante.nom, ..._otrasMias.map(a=>a.nom)])];
+    }
   }
   if(adminAuth){renderPlanilla();renderAdmDash();}
 
@@ -7192,7 +7238,12 @@ function confirmarEdicionCC(nom){
       .then(()=>cargarFinanzasDesdeServidor())
       .catch(e=>showNotif('⚠️ No se pudo mover la cédula en Supabase: '+(e.message||e)));
   }
+  // v60: la cédula es de la PERSONA → se actualiza en todas sus adopciones
+  adoptantes.filter(x=>x!==a && ccAnterior && String(x.cc)===String(ccAnterior)).forEach(x=>{
+    x.cc = val; if(sync) x.pin = val.slice(-4); if(x.id && gidDeTexto(x.gdn)) x.id = val+'-'+gidDeTexto(x.gdn);
+  });
   a.cc = val;
+  if(a.id && gidDeTexto(a.gdn)) a.id = val+'-'+gidDeTexto(a.gdn);
   if(sync) a.pin = val.slice(-4);
 
   // Mantener sincronizado el registro de pagos de este adoptante (mismo nombre)
@@ -7337,14 +7388,15 @@ function confirmarBorrarAdoptante(nom, txId){
   }
 
   // Eliminar de adoptantes — por email si está disponible (más preciso), si no por nombre
-  const coincide = a => email ? (a.email||'').toLowerCase()===email.toLowerCase() : a.nom===nom;
+  // v60: una persona puede tener varios guardianes → se borra SOLO esta adopción
+  const coincide = a => registro ? a===registro : (email ? (a.email||'').toLowerCase()===email.toLowerCase() : a.nom===nom);
   const restantesAd = adoptantes.filter(a=>!coincide(a));
-  const eliminadosCC = adoptantes.filter(coincide).map(a=>a.cc).filter(Boolean);
+  const eliminadosAd = adoptantes.filter(coincide).filter(a=>a.cc);
   adoptantes.length=0;
   adoptantes.push(...restantesAd);
   // v55: el borrado en la tabla `adoptantes` de Supabase requiere contraseña
   // de admin (función protegida) — a diferencia de guardar, que es público.
-  eliminadosCC.forEach(cc=>eliminarAdoptanteDeSupabase(cc));
+  eliminadosAd.forEach(a=>eliminarAdoptanteDeSupabase(a));
 
   // Eliminar de registroPagos (por nombre — es la clave usada en ese array)
   const ants=registroPagos.filter(r=>r.adoptante!==nom);
@@ -7428,7 +7480,7 @@ function ejecutarLimpiarPrueba(){
   const restantesAd = adoptantes.filter(a=>!ADOPTANTES_PRUEBA.includes(a.nom));
   adoptantes.length=0; adoptantes.push(...restantesAd);
   // v55: borrar también de la tabla `adoptantes` en Supabase (función protegida)
-  eliminados.map(a=>a.cc).filter(Boolean).forEach(cc=>eliminarAdoptanteDeSupabase(cc));
+  eliminados.filter(a=>a.cc).forEach(a=>eliminarAdoptanteDeSupabase(a));
 
   const restantesPagos = registroPagos.filter(r=>!ADOPTANTES_PRUEBA.includes(r.adoptante));
   registroPagos.length=0; registroPagos.push(...restantesPagos);
@@ -7959,23 +8011,103 @@ async function loginAdoptante(){
 }
 
 // v58: carga en memoria los datos que devolvió el servidor para este adoptante
+// v60: una persona puede tener VARIOS guardianes → una entrada por adopción.
+// Devuelve la primera; las demás quedan en window._portalSesion.adopciones.
 function aplicarDatosPortal(d, email, pin){
-  const s = d.adoptante;
-  window._portalSesion = { email, pin, nom: s.nom };
-  let a = adoptantes.find(x=>(x.email||'').toLowerCase()===email);
-  const datos = { nom:s.nom, email:s.email||email, tel:s.tel||'', ciu:s.ciu||'', gdn:s.gdn||'—', inv:s.inv||0, ret:s.ret||0,
-    mes:s.mes||'Mes 1/5', est:s.est||'ok', fecha:s.fecha||'', txId:s.tx_id||'', ccMask:s.cc_mask||'' };
-  if(a){ Object.assign(a, datos); } else { a = { ...datos, cc:'', _portal:true }; adoptantes.push(a); }
-  // Cuotas: las del servidor reemplazan a las locales de este adoptante
-  const otras = registroPagos.filter(r=>r.adoptante!==a.nom);
-  const mias = (d.cuotas||[]).map(c=>({ adoptante:a.nom, email:a.email, tel:a.tel, guardian:a.gdn, mes:c.mes,
-    concepto:c.concepto, monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
-    estado:c.estado||'pendiente', historial:[], txId:c.reference||a.txId||'' }));
-  registroPagos.length = 0; registroPagos.push(...otras, ...mias);
-  if(!mias.length) _asegurarPagosAdoptante(a);
-  const pv = (d.por_verificar||[])[0];
-  if(pv){ a.est = 'verif'; a.verifMes = pv.mes; }
-  return a;
+  const lista = (Array.isArray(d.adopciones) && d.adopciones.length) ? d.adopciones
+    : [{ adopcion: d.adoptante, cuotas: d.cuotas||[], por_verificar: d.por_verificar||[] }];
+  const nomReal = (lista[0].adopcion||{}).nom || '';
+  // Quitar lo que este dispositivo tuviera de una sesión anterior de este correo
+  const viejos = adoptantes.filter(x=>x._portal && (x.email||'').toLowerCase()===email);
+  viejos.forEach(v=>{ const i = adoptantes.indexOf(v); if(i>=0) adoptantes.splice(i,1); });
+  const entradas = lista.map(item=>{
+    const s = item.adopcion || {};
+    const gid = s.gid || gidDeTexto(s.gdn);
+    let a = adoptantes.find(x=>(x.email||'').toLowerCase()===email && gidDeTexto(x.gdn)===gid);
+    const datos = { email:s.email||email, tel:s.tel||'', ciu:s.ciu||'', gdn:s.gdn||'—', inv:s.inv||0, ret:s.ret||0,
+      mes:s.mes||'Mes 1/5', est:s.est||'ok', fecha:s.fecha||'', txId:s.tx_id||'', ccMask:s.cc_mask||'' };
+    if(a){ Object.assign(a, datos); a.nom = nombreRealDe(a); } else { a = { nom:s.nom||nomReal, ...datos, cc:'', _portal:true }; adoptantes.push(a); }
+    a._item = item;
+    return a;
+  });
+  const anteriores = entradas.map(a=>a.nom);
+  aplicarNombresVisibles(entradas, ()=>'misma');
+  entradas.forEach((a,i)=>{
+    const item = a._item; delete a._item;
+    // Cuotas: las del servidor reemplazan a las locales de esta adopción
+    const otras = registroPagos.filter(r=>r.adoptante!==a.nom && r.adoptante!==anteriores[i]);
+    const mias = (item.cuotas||[]).map(c=>({ adoptante:a.nom, email:a.email, tel:a.tel, guardian:a.gdn, mes:c.mes,
+      concepto:c.concepto, monto:c.monto, pagado:c.pagado, saldo:c.saldo, fechaVence:c.fecha_vence, fechaPago:c.fecha_pago,
+      estado:c.estado||'pendiente', historial:[], txId:c.reference||a.txId||'' }));
+    registroPagos.length = 0; registroPagos.push(...otras, ...mias);
+    if(!mias.length) _asegurarPagosAdoptante(a);
+    const pv = (item.por_verificar||[])[0];
+    if(pv){ a.est = 'verif'; a.verifMes = pv.mes; }
+  });
+  window._portalSesion = { email, pin, nom: nomReal, noms: entradas.map(a=>a.nom), adopciones: entradas };
+  return entradas[0];
+}
+
+// v60: "Adoptar otro guardián" — lleva al formulario con los datos ya guardados
+function prellenarFormularioAdopcion(a){
+  const setV = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
+  setV('a-nom', nombreRealDe(a)); setV('a-ema', a.email); setV('a-tel', a.tel); setV('a-ciu', a.ciu);
+  const cc = document.getElementById('a-cc');
+  if(cc){
+    if(window._portalSesion){ cc.value=''; cc.readOnly=true; cc.placeholder='✅ Verificada '+(a.ccMask||''); }
+    else { cc.value = a.cc||''; }
+  }
+  const box = document.getElementById('ya-guardian-box');
+  if(box && window._portalSesion){
+    box.innerHTML = '<div style="font-size:.78rem;color:#95d5b2;">✅ Usando los datos de <strong>'+escapeHtml(nombreRealDe(a))+'</strong>. '
+      +'Para adoptar a nombre de otra persona, <a href="#" onclick="olvidarDatosGuardian();return false;" style="color:#d4a843;">usa otros datos</a>.</div>';
+  }
+  selIdx = -1;
+  const el=document.getElementById('sel-guardian'); if(el) el.textContent='Ninguno';
+}
+function adoptarOtroGuardian(nom){
+  const a = adoptantes.find(x=>x.nom===nom) || (window._portalSesion?.adopciones||[])[0];
+  if(!a) return;
+  prellenarFormularioAdopcion(a);
+  closeMod('mod-panel-adoptante');
+  adpGo(0);
+  document.getElementById('adoptar')?.scrollIntoView({behavior:'smooth'});
+  showNotif('🐷 Tus datos ya están listos. Revisa tu teléfono y elige tu nuevo guardián.');
+}
+// Recuadro "¿Ya eres guardián?" del paso 1 del formulario
+const YA_GUARDIAN_HTML = `
+  <div style="font-size:.78rem;color:#95d5b2;font-weight:700;margin-bottom:6px;">🐷 ¿Ya eres guardián? Usa tus datos guardados</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+    <input type="email" id="yg-email" placeholder="Tu correo" style="flex:2;min-width:150px;background:rgba(255,255,255,.06);border:1px solid rgba(82,183,136,.25);border-radius:7px;padding:8px;color:#f8f4e8;font-size:.8rem;">
+    <input type="password" id="yg-pin" placeholder="Clave (4 dígitos)" maxlength="4" inputmode="numeric" style="flex:1;min-width:110px;background:rgba(255,255,255,.06);border:1px solid rgba(82,183,136,.25);border-radius:7px;padding:8px;color:#f8f4e8;font-size:.8rem;">
+    <button type="button" onclick="usarDatosGuardian()" style="background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:7px;padding:8px 12px;color:#fff;font-weight:700;font-size:.76rem;cursor:pointer;">Usar mis datos</button>
+  </div>
+  <div id="yg-err" style="display:none;font-size:.72rem;color:#e07070;margin-top:6px;"></div>
+  <div style="font-size:.66rem;color:rgba(255,255,255,.35);margin-top:5px;">Tu clave son los últimos 4 dígitos de tu cédula. Si es tu primera adopción, llena el formulario de abajo.</div>`;
+document.addEventListener('DOMContentLoaded', ()=>{ const b=document.getElementById('ya-guardian-box'); if(b && !b.innerHTML.trim()) b.innerHTML = YA_GUARDIAN_HTML; });
+async function usarDatosGuardian(){
+  const email = (document.getElementById('yg-email')?.value||'').trim().toLowerCase();
+  const pin   = (document.getElementById('yg-pin')?.value||'').trim();
+  const err   = document.getElementById('yg-err');
+  const msg = t => { if(err){ err.textContent = t; err.style.display = t ? 'block' : 'none'; } };
+  if(!email || !/^\d{4}$/.test(pin)){ msg('Escribe tu correo y los 4 dígitos de tu clave.'); return; }
+  msg('');
+  try{
+    const resp = await fetch('/.netlify/functions/portal-adoptante', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, pin}),
+    });
+    const d = await resp.json().catch(()=>({}));
+    if(!resp.ok || !d.ok){ msg('❌ '+(d.error||'No pudimos verificar tus datos.')); return; }
+    const a = aplicarDatosPortal(d, email, pin);
+    prellenarFormularioAdopcion(a);
+    showNotif('✅ Datos cargados. Ahora elige tu nuevo guardián.');
+  }catch(e){ msg('⚠️ Sin conexión. Intenta de nuevo en un momento.'); }
+}
+function olvidarDatosGuardian(){
+  cerrarSesionAdoptante();
+  ['a-nom','a-ema','a-tel','a-ciu','a-cc'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.value=''; e.readOnly=false; } });
+  const cc=document.getElementById('a-cc'); if(cc) cc.placeholder='Número de cédula';
+  const box=document.getElementById('ya-guardian-box'); if(box) box.innerHTML = YA_GUARDIAN_HTML;
 }
 
 // Genera registroPagos si el adoptante no los tiene aún (adoptantes demo o restaurados)
@@ -8010,6 +8142,8 @@ function renderPanelAdoptante(a){
   if(loginSec)loginSec.style.display='none';
   if(!panelSec)return;
   panelSec.style.display='block';
+  // v60: el panel usa textos claros → fondo oscuro (antes quedaba texto blanco sobre blanco)
+  const _box = panelSec.closest('.mod-box'); if(_box) _box.style.background = '#0d2a1c';
   const estLbl={ok:'Al día',pend:'Pendiente pago',alerta:'Pago vencido',compl:'Ciclo completado',verif:'Pago en verificación'};
   const estIco={ok:'✅',pend:'⚠️',alerta:'🔴',compl:'🎉',verif:'🕓'};
   const estCol={ok:'#52b788',pend:'#d4a843',alerta:'#e07070',compl:'#95d5b2',verif:'#a89aff'};
@@ -8017,6 +8151,17 @@ function renderPanelAdoptante(a){
   const mesAct=parseInt(partes[0].replace('Mes ',''))||1;
   const mesTot=parseInt(partes[1])||5;
   const pct=Math.round(mesAct/mesTot*100);
+
+  // v60: si la persona tiene varios guardianes, botones para cambiar entre ellos
+  const misAdopciones = (window._portalSesion?.adopciones||[]).filter(x=>adoptantes.includes(x));
+  const selectorGuardianes = misAdopciones.length>1 ? `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;" id="selector-guardianes">
+      <span style="font-size:.62rem;color:rgba(255,255,255,.4);width:100%;text-transform:uppercase;letter-spacing:.08em;">Tus guardianes (${misAdopciones.length})</span>
+      ${misAdopciones.map(x=>`<button onclick="renderPanelAdoptante(window._portalSesion.adopciones[${window._portalSesion.adopciones.indexOf(x)}])"
+        style="background:${x===a?'rgba(212,168,67,.18)':'rgba(255,255,255,.04)'};border:1px solid ${x===a?'rgba(212,168,67,.5)':'rgba(255,255,255,.1)'};
+        color:${x===a?'#d4a843':'rgba(255,255,255,.65)'};border-radius:20px;padding:5px 11px;font-size:.72rem;cursor:pointer;font-family:'DM Sans',sans-serif;">
+        🐷 ${escapeHtml(nombreGuardianDe(x.gdn))}</button>`).join('')}
+    </div>` : '';
 
   // ── Obtener cuotas pendientes del sistema de pagos ──
   const misPagos=registroPagos.filter(r=>r.adoptante===a.nom);
@@ -8056,7 +8201,7 @@ function renderPanelAdoptante(a){
     <div style="display:flex;align-items:center;justify-content:space-between;
       margin-bottom:15px;flex-wrap:wrap;gap:8px;">
       <div>
-        <div style="font-size:.96rem;font-weight:700;color:#f8f4e8;">👋 Hola, ${escapeHtml(a.nom.split(' ')[0])}</div>
+        <div style="font-size:.96rem;font-weight:700;color:#f8f4e8;">👋 Hola, ${escapeHtml(String(nombreRealDe(a)||'').split(' ')[0])}</div>
         <div style="font-size:.7rem;color:rgba(255,255,255,.35);">${escapeHtml(a.email)}</div>
       </div>
       <button onclick="cerrarSesionAdoptante()"
@@ -8065,6 +8210,7 @@ function renderPanelAdoptante(a){
         cursor:pointer;font-family:'DM Sans',sans-serif;">Cerrar sesión</button>
     </div>
 
+    ${selectorGuardianes}
     <div style="background:rgba(255,255,255,.03);border:1px solid rgba(82,183,136,.15);
       border-radius:12px;padding:13px;margin-bottom:12px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -8111,6 +8257,10 @@ function renderPanelAdoptante(a){
         border-radius:10px;padding:10px;color:#d4a843;font-size:.72rem;font-weight:700;
         cursor:pointer;font-family:'DM Sans',sans-serif;">📜 Certificado</button>
     </div>
+    <button onclick="adoptarOtroGuardian('${escapeHtml(a.nom)}')"
+      style="width:100%;background:rgba(82,183,136,.1);border:1px dashed rgba(82,183,136,.45);
+      border-radius:10px;padding:10px;color:#95d5b2;font-size:.76rem;font-weight:700;margin-top:4px;
+      cursor:pointer;font-family:'DM Sans',sans-serif;">🐷➕ Adoptar otro guardián con mis datos</button>
     <div style="text-align:center;font-size:.62rem;color:rgba(255,255,255,.2);margin-top:8px;">
       Adopción: ${escapeHtml(a.fecha)} · La Escondida © 2025</div>`;
 }
@@ -8184,7 +8334,7 @@ function confirmarMetodoCuota(met){
 
   // Precargar datos del adoptante en campos del stepper
   var setV = function(id,v){ var e=document.getElementById(id); if(e) e.value=v; };
-  setV('a-nom', ctx.adoptante.nom);
+  setV('a-nom', nombreRealDe(ctx.adoptante));
   setV('a-ema', ctx.adoptante.email||'');
   setV('a-tel', ctx.adoptante.tel||'');
   setV('a-ciu', ctx.adoptante.ciu||'');
@@ -8211,15 +8361,16 @@ function cerrarModalPagarCuota(){
 function cerrarSesionAdoptante(){
   // v58: no dejar los datos de este adoptante en este dispositivo
   if(window._portalSesion){
-    const nom = window._portalSesion.nom;
-    for(let i=adoptantes.length-1;i>=0;i--){ if(adoptantes[i]._portal && adoptantes[i].nom===nom) adoptantes.splice(i,1); }
-    if(!adoptantes.some(a=>a.nom===nom)){ for(let i=registroPagos.length-1;i>=0;i--){ if(registroPagos[i].adoptante===nom) registroPagos.splice(i,1); } }
+    const noms = [window._portalSesion.nom, ...(window._portalSesion.noms||[])];
+    for(let i=adoptantes.length-1;i>=0;i--){ if(adoptantes[i]._portal && noms.includes(adoptantes[i].nom)) adoptantes.splice(i,1); }
+    noms.forEach(nom=>{ if(!adoptantes.some(a=>a.nom===nom)){ for(let i=registroPagos.length-1;i>=0;i--){ if(registroPagos[i].adoptante===nom) registroPagos.splice(i,1); } } });
     window._portalSesion = null;
+    const cc=document.getElementById('a-cc'); if(cc && cc.readOnly){ cc.readOnly=false; cc.placeholder='Número de cédula'; }
   }
   const loginSec=document.getElementById('adoptante-login-section');
   const panelSec=document.getElementById('adoptante-panel-section');
   if(loginSec)loginSec.style.display='block';
-  if(panelSec)panelSec.style.display='none';
+  if(panelSec){ panelSec.style.display='none'; const _box = panelSec.closest('.mod-box'); if(_box) _box.style.background = ''; }
   const emailInp=document.getElementById('adopt-login-email');
   const pwdInp=document.getElementById('adopt-login-pwd');
   if(emailInp)emailInp.value='';
