@@ -1,4 +1,4 @@
-// netlify/lib/finanzas.js  (v57, v58: acceso al portal del adoptante)
+// netlify/lib/finanzas.js  (v57, v58: portal del adoptante, v60: varias adopciones por persona)
 //
 // Lógica compartida del SERVIDOR para adopciones, cuotas y contabilidad.
 // La usan tres funciones de Netlify:
@@ -11,8 +11,14 @@
 // requieren. Todas las escrituras usan la Service Role Key (variable de
 // entorno de Netlify), nunca la anon key pública del sitio.
 //
-// Tablas (ver GUIA_SUPABASE_v5_v57.sql): intenciones_pago, cuotas,
+// Tablas (ver GUIA_SUPABASE_v6_v58.sql y v7_v60.sql): intenciones_pago, cuotas,
 // libro_contable, adoptantes, guardianes, config_sitio.
+//
+// v60 — UNA PERSONA PUEDE ADOPTAR VARIOS GUARDIANES. Cada adopción tiene su
+// propio identificador: aid = '<cédula>-<guardián>' (ej. '1012345678-G-004').
+//   adoptantes.id = aid (una fila por adopción; la cédula se repite)
+//   cuotas.id     = '<aid>-<mes>' y cuotas.adopcion_id = aid
+//   libro_contable.adopcion_id / intenciones_pago.adopcion_id = aid
 
 const SUPABASE_URL = process.env.SUPABASE_URL_OVERRIDE || 'https://rbryttidysmkkjmmsezj.supabase.co';
 
@@ -73,13 +79,24 @@ function calcular(c) {
 
 const hoyISO = () => new Date().toISOString().slice(0, 10);
 const hoyCO = () => new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
-const idCuota = (cc, mes) => `${cc}-${mes}`;
+const idAdopcion = (cc, gid) => `${cc}-${gid}`;
+const idCuota = (aid, mes) => `${aid}-${mes}`;
+const gidDe = (txt) => (String(txt || '').match(/G-\d{3}/) || [null])[0];
 
 // ── Lecturas ──────────────────────────────────────────────────────────────
 const leerIntencion = async (ref) => (await leer(`intenciones_pago?reference=eq.${q(ref)}&select=*`))?.[0] || null;
-const leerAdoptante = async (cc) => (await leer(`adoptantes?cc=eq.${q(cc)}&select=*`))?.[0] || null;
+const leerAdopcion = async (aid) => (await leer(`adoptantes?id=eq.${q(aid)}&select=*`))?.[0] || null;
+const leerAdopcionesDe = async (cc) => (await leer(`adoptantes?cc=eq.${q(cc)}&select=*&order=fecha.asc`)) || [];
+const leerAdoptante = async (cc) => (await leerAdopcionesDe(cc))[0] || null; // datos personales (cualquier adopción)
+// Busca la adopción de esta persona para ese guardián: primero por su id
+// estándar y, si el admin cambió el guardián en la planilla, por el texto gdn.
+async function resolverAdopcion(cc, gid) {
+  const directa = await leerAdopcion(idAdopcion(cc, gid));
+  if (directa) return directa;
+  return (await leerAdopcionesDe(cc)).find((x) => gidDe(x.gdn) === gid) || null;
+}
 const leerGuardian = async (id) => (await leer(`guardianes?id=eq.${q(id)}&select=id,estado,cedula`))?.[0] || null;
-const leerCuotas = async (cc) => (await leer(`cuotas?cc=eq.${q(cc)}&select=*&order=mes.asc`)) || [];
+const leerCuotas = async (aid) => (await leer(`cuotas?adopcion_id=eq.${q(aid)}&select=*&order=mes.asc`)) || [];
 
 // ¿Puede esta cédula adoptar este guardián? (libre, o ya es suyo)
 async function guardianLibrePara(gid, cc) {
@@ -90,9 +107,9 @@ async function guardianLibrePara(gid, cc) {
 }
 
 // Monto que corresponde a una cuota: el saldo real si ya existe, si no el estándar
-async function montoDeCuota(cc, mes, C) {
-  if (cc) {
-    const c = (await leer(`cuotas?id=eq.${q(idCuota(cc, mes))}&select=saldo`))?.[0];
+async function montoDeCuota(aid, mes, C) {
+  if (aid) {
+    const c = (await leer(`cuotas?id=eq.${q(idCuota(aid, mes))}&select=saldo`))?.[0];
     if (c && c.saldo > 0) return c.saldo;
   }
   return mes === 1 ? C.primerPago : C.cuotaMes;
@@ -101,8 +118,8 @@ async function montoDeCuota(cc, mes, C) {
 // Crea el calendario de N cuotas (sin pagar) si la cédula aún no tiene uno
 // mesActual > 1 sin calendario previo = adoptante de antes de v57: las cuotas
 // anteriores se marcan pagadas como "histórico" (sin asiento contable nuevo).
-async function asegurarCalendario(cc, C, fechaBase, mesActual = 1) {
-  const existentes = await leerCuotas(cc);
+async function asegurarCalendario(aid, cc, C, fechaBase, mesActual = 1) {
+  const existentes = await leerCuotas(aid);
   if (existentes.length) return existentes;
   const base = new Date(fechaBase || Date.now());
   if (mesActual > 1) base.setDate(base.getDate() - (mesActual - 1) * 30);
@@ -112,7 +129,7 @@ async function asegurarCalendario(cc, C, fechaBase, mesActual = 1) {
     const monto = m === 1 ? C.primerPago : C.cuotaMes;
     const hist = m < mesActual;
     filas.push({
-      id: idCuota(cc, m), cc, mes: m,
+      id: idCuota(aid, m), adopcion_id: aid, cc, mes: m,
       concepto: m === 1 ? 'Lechón + Concentrado + Admin' : 'Concentrado + Admin',
       monto, pagado: hist ? monto : 0, saldo: hist ? 0 : monto, fecha_vence: vence.toISOString().slice(0, 10),
       fecha_pago: null, estado: hist ? 'al-dia' : 'pendiente',
@@ -121,14 +138,14 @@ async function asegurarCalendario(cc, C, fechaBase, mesActual = 1) {
     });
   }
   await upsert('cuotas', filas, true);
-  return leerCuotas(cc);
+  return leerCuotas(aid);
 }
 
 // Aplica un pago a una cuota y lo anota UNA sola vez en el libro contable
 // (libroId es la llave: si Wompi reintenta el aviso, no se duplica).
-async function aplicarPagoCuota({ cc, mes, monto, metodo, reference, libroId, adoptanteNom, gdn }) {
-  const c = (await leer(`cuotas?id=eq.${q(idCuota(cc, mes))}&select=*`))?.[0];
-  if (!c) throw new Error(`No existe la cuota ${mes} de la cédula ${cc}.`);
+async function aplicarPagoCuota({ aid, cc, mes, monto, metodo, reference, libroId, adoptanteNom, gdn }) {
+  const c = (await leer(`cuotas?id=eq.${q(idCuota(aid, mes))}&select=*`))?.[0];
+  if (!c) throw new Error(`No existe la cuota ${mes} de la adopción ${aid}.`);
   const yaAnotado = (await leer(`libro_contable?id=eq.${q(libroId)}&select=id`))?.length > 0;
   if (yaAnotado) return c;
   const abono = Math.min(Math.max(0, Math.round(monto)), Math.max(0, c.saldo)) || 0;
@@ -136,7 +153,7 @@ async function aplicarPagoCuota({ cc, mes, monto, metodo, reference, libroId, ad
   const saldo = Math.max(0, c.monto - pagado);
   const historial = [...(Array.isArray(c.historial) ? c.historial : []), { fecha: hoyISO(), monto: abono, tipo: saldo <= 0 ? 'pago-completo' : 'pago-parcial', metodo, reference }];
   await upsert('libro_contable', [{
-    id: libroId, fecha: hoyISO(), cc, adoptante: adoptanteNom || null,
+    id: libroId, fecha: hoyISO(), cc, adopcion_id: aid, adoptante: adoptanteNom || null,
     concepto: `Pago Mes ${mes}${saldo > 0 ? ' (parcial)' : ''} — ${gdn || ''}`.trim(),
     ingreso: abono, egreso: 0, tipo: `💳 ${metodo || 'Pago'}`, reference: reference || null,
   }], true);
@@ -148,8 +165,8 @@ async function aplicarPagoCuota({ cc, mes, monto, metodo, reference, libroId, ad
 }
 
 // "Mes X/N" = la cuota más alta ya pagada completa
-async function resumenProgreso(cc, meses) {
-  const cuotas = await leerCuotas(cc);
+async function resumenProgreso(aid, meses) {
+  const cuotas = await leerCuotas(aid);
   const pagadas = cuotas.filter((x) => x.saldo <= 0).map((x) => x.mes);
   const x = pagadas.length ? Math.max(...pagadas) : 1;
   return { mes: `Mes ${x}/${meses}`, completo: pagadas.length >= meses };
@@ -166,21 +183,24 @@ async function reservarGuardian(i, extra = {}) {
 }
 
 async function guardarAdoptanteDesdeIntencion(i, C, est) {
-  const previo = await leerAdoptante(i.cc);
-  const prog = await resumenProgreso(i.cc, C.meses);
+  const aid = i.adopcion_id || idAdopcion(i.cc, i.guardian_id);
+  const previo = await leerAdopcion(aid);
+  const persona = previo || await leerAdoptante(i.cc);   // datos personales si ya adoptó otro guardián
+  const prog = await resumenProgreso(aid, C.meses);
   const fila = {
+    id: aid,
     cc: i.cc,
-    nom: previo?.nom || i.nom,
-    email: i.email || previo?.email || null,
-    tel: i.tel || previo?.tel || null,
-    ciu: i.ciu || previo?.ciu || null,
+    nom: persona?.nom || i.nom,
+    email: i.email || persona?.email || null,
+    tel: i.tel || persona?.tel || null,
+    ciu: i.ciu || persona?.ciu || null,
     gdn: previo?.gdn || `${i.guardian_nombre || ''} ${i.guardian_id}`.trim(),
     inv: previo?.inv ?? C.totalInv,
     ret: previo?.ret ?? C.retorno,
     mes: prog.mes,
     est: est || (prog.completo ? 'compl' : 'ok'),
     fecha: previo?.fecha || hoyCO(),
-    pin: previo?.pin || String(i.cc).slice(-4),
+    pin: persona?.pin || String(i.cc).slice(-4),
     tx_id: i.reference,
     actualizado_en: new Date().toISOString(),
   };
@@ -206,9 +226,10 @@ async function aprobarIntencion(ref, { metodoLabel, via } = {}) {
       conflicto = !(await guardianLibrePara(i.guardian_id, i.cc));
       if (!conflicto) await reservarGuardian(i, { monto_pagado: i.monto, mes_pagado: 1 });
     }
-    await asegurarCalendario(i.cc, C, null, i.mes);
+    const aid = i.adopcion_id || idAdopcion(i.cc, i.guardian_id);
+    await asegurarCalendario(aid, i.cc, C, null, i.mes);
     await aplicarPagoCuota({
-      cc: i.cc, mes: i.mes, monto: i.monto, metodo: metodoLabel || i.metodo, reference: i.reference,
+      aid, cc: i.cc, mes: i.mes, monto: i.monto, metodo: metodoLabel || i.metodo, reference: i.reference,
       libroId: `${via === 'admin' ? 'V' : 'W'}-${i.reference}`, adoptanteNom: i.nom,
       gdn: `${i.guardian_nombre || ''} ${i.guardian_id}`.trim(),
     });
@@ -227,17 +248,19 @@ async function rechazarIntencion(ref) {
   const i = await reclamar(ref, 'pendiente', 'rechazado');
   if (!i) return { ok: false, motivo: 'ya_procesada_o_inexistente' };
   if (i.metodo !== 'wom') {
+    const aid = i.adopcion_id || idAdopcion(i.cc, i.guardian_id);
     if (i.mes === 1) {
-      // La reserva manual se deshace: guardián libre y adoptante sin pagos fuera
-      const cuotas = await leerCuotas(i.cc);
+      // La reserva manual se deshace: guardián libre y ESA adopción sin pagos fuera
+      // (las demás adopciones de la misma persona no se tocan)
+      const cuotas = await leerCuotas(aid);
       const tienePagos = cuotas.some((c) => c.pagado > 0);
       await borrar(`guardianes?id=eq.${q(i.guardian_id)}&cedula=eq.${q(i.cc)}`);
       if (!tienePagos) {
-        await borrar(`cuotas?cc=eq.${q(i.cc)}`);
-        await borrar(`adoptantes?cc=eq.${q(i.cc)}`);
+        await borrar(`cuotas?adopcion_id=eq.${q(aid)}`);
+        await borrar(`adoptantes?id=eq.${q(aid)}`);
       }
     } else {
-      await actualizar(`adoptantes?cc=eq.${q(i.cc)}`, { est: 'pend' });
+      await actualizar(`adoptantes?id=eq.${q(aid)}`, { est: 'pend' });
     }
   }
   return { ok: true, intencion: i };
@@ -273,8 +296,8 @@ async function verificarAccesoPortal(emailIn, pinIn) {
 
 module.exports = {
   sb, leer, upsert, actualizar, borrar, q,
-  leerConfig, calcular, hoyISO, hoyCO, idCuota,
-  leerIntencion, leerAdoptante, leerCuotas, guardianLibrePara, montoDeCuota,
+  leerConfig, calcular, hoyISO, hoyCO, idCuota, idAdopcion, gidDe,
+  leerIntencion, leerAdoptante, leerAdopcion, leerAdopcionesDe, resolverAdopcion, leerCuotas, guardianLibrePara, montoDeCuota,
   asegurarCalendario, aplicarPagoCuota, resumenProgreso, reservarGuardian,
   guardarAdoptanteDesdeIntencion, aprobarIntencion, rechazarIntencion,
   verificarAccesoPortal,
