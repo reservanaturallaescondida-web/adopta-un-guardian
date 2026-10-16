@@ -32,10 +32,6 @@ exports.handler = async (event) => {
   const reference = txt(b.reference, 64);
   const metodo = txt(b.metodo, 3);
   let cc = txt(b.cc, 20).replace(/\D/g, '');
-  const nom = txt(b.nom, 120);
-  const email = txt(b.email, 160).toLowerCase();
-  const tel = txt(b.tel, 40);
-  const ciu = txt(b.ciu, 120);
   const gid = txt(b.guardian_id, 12).toUpperCase();
   const gnom = txt(b.guardian_nombre, 60);
   const mes = parseInt(b.mes, 10);
@@ -45,8 +41,15 @@ exports.handler = async (event) => {
 
   // v58: pago de cuotas desde el portal en otro dispositivo — el adoptante se
   // identifica con correo + clave y el servidor pone su cédula (el navegador no la tiene).
+  // v60: también sirve para adoptar OTRO guardián con los datos ya guardados:
+  // el servidor toma cédula, nombre, correo, teléfono y ciudad de la cuenta.
+  let nom = txt(b.nom, 120), email = txt(b.email, 160).toLowerCase(), tel = txt(b.tel, 40), ciu = txt(b.ciu, 120);
   if (b.portal_email && b.portal_pin) {
-    try { const a = await F.verificarAccesoPortal(b.portal_email, b.portal_pin); cc = String(a.cc); }
+    try {
+      const a = await F.verificarAccesoPortal(b.portal_email, b.portal_pin);
+      cc = String(a.cc); nom = txt(a.nom, 120) || nom; email = txt(a.email, 160).toLowerCase() || email;
+      tel = txt(a.tel, 40) || tel; ciu = txt(a.ciu, 120) || ciu;
+    }
     catch (e) { return resp(e.status && e.status < 500 ? e.status : 500, { error: e.message || 'No pudimos verificar tu acceso.' }); }
   }
   if (!METODOS[metodo]) return resp(400, { error: 'Método de pago inválido.' });
@@ -67,16 +70,18 @@ exports.handler = async (event) => {
     const recientes = await F.leer(`intenciones_pago?cc=eq.${F.q(cc)}&estado=eq.pendiente&creado_en=gte.${F.q(desde)}&select=reference`);
     if ((recientes || []).length >= 3) return resp(429, { error: 'Ya tienes pagos pendientes de verificación. Escríbenos por WhatsApp para completarlos.' });
 
+    // v60: una adopción = cédula + guardián (una persona puede tener varias)
+    const existente = await F.resolverAdopcion(cc, gid);
+    const aid = existente?.id || F.idAdopcion(cc, gid);
     if (mes === 1) {
       if (!(await F.guardianLibrePara(gid, cc))) return resp(409, { error: 'Este guardián acaba de ser adoptado por otra persona. Por favor elige otro.' });
-    } else {
-      const ad = await F.leerAdoptante(cc);
-      if (!ad) return resp(404, { error: 'No encontramos tu adopción con esa cédula. Contáctanos por WhatsApp.' });
+    } else if (!existente) {
+      return resp(404, { error: 'No encontramos tu adopción de ese guardián. Contáctanos por WhatsApp.' });
     }
 
-    const monto = Math.round(await F.montoDeCuota(cc, mes, C));
+    const monto = Math.round(await F.montoDeCuota(aid, mes, C));
     const intencion = {
-      reference, metodo, mes, monto, cc, nom, email: email || null, tel: tel || null, ciu: ciu || null,
+      reference, metodo, mes, monto, cc, adopcion_id: aid, nom, email: email || null, tel: tel || null, ciu: ciu || null,
       guardian_id: gid, guardian_nombre: gnom || null, comprobante: comprobante || null,
       estado: 'pendiente', creado_en: new Date().toISOString(),
     };
@@ -92,7 +97,7 @@ exports.handler = async (event) => {
 
     // Pago manual: reservar guardián + calendario + adoptante "Por verificar"
     if (mes === 1) await F.reservarGuardian(intencion, { monto_pagado: 0, mes_pagado: null });
-    await F.asegurarCalendario(cc, C, null, mes);
+    await F.asegurarCalendario(aid, cc, C, null, mes);
     await F.guardarAdoptanteDesdeIntencion(intencion, C, 'verif');
     return resp(200, { ok: true, reference, monto, estado: 'por_verificar' });
   } catch (e) {
