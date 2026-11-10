@@ -1630,86 +1630,28 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
   </div>
 </div>
 
-<!-- MODAL: Lock Config / Login Admin -->
+<!-- MODAL: Login Admin (v61: clave + código de la app + captcha opcional; TODO se verifica en el servidor) -->
 <div class="mod-ov" id="mod-cfg">
   <div class="mod-box" style="background:#0d2a1c;border:1px solid rgba(82,183,136,.3);color:#f8f4e8;">
     <button class="mod-cl" onclick="closeMod('mod-cfg')">✕</button>
     <h3>🔐 Acceso Administrador</h3>
-    <p class="mod-sub">Ingresa la clave de administrador para continuar.</p>
-    <div id="cfg-login-info"><div style="background:rgba(212,168,67,.08);border:1px solid rgba(212,168,67,.2);border-radius:8px;padding:7px 12px;font-size:.72rem;color:#d4a843;margin-bottom:10px;">
-        ⚠️ Intento 1/3. 2 intentos restantes.</div></div>
-    <div class="mod-err" id="cfg-err" style="display: none;">❌ Clave incorrecta. Intento 1 de 3.</div>
-
-    <!-- Grupo contraseña -->
+    <p class="mod-sub">Escribe tu clave y el código de 6 dígitos que muestra tu app autenticadora.</p>
+    <div id="cfg-login-info"></div>
+    <div class="mod-err" id="cfg-err" style="display: none;"></div>
     <div id="cfg-pwd-grupo" style="display: block;">
-      <input class="mod-inp" type="password" id="cfg-pwd" placeholder="Clave de administrador" onkeypress="if(event.key==='Enter')verifyCfg()">
+      <input class="mod-inp" type="password" id="cfg-pwd" placeholder="Clave de administrador" autocomplete="current-password" onkeypress="if(event.key==='Enter')document.getElementById('cfg-code').focus()">
       <div style="position:relative;margin-top:-6px;margin-bottom:10px;text-align:right;">
         <button type="button" onclick="
           const i=document.getElementById('cfg-pwd');
           i.type=i.type==='password'?'text':'password';
-          this.textContent=i.type==='password'?'🙈 Ocultar':'👁️ Ver clave';" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:.72rem;cursor:pointer;padding:2px 6px;">👁️ Ver clave</button>
+          this.textContent=i.type==='password'?'👁️ Ver clave':'🙈 Ocultar';" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:.72rem;cursor:pointer;padding:2px 6px;">👁️ Ver clave</button>
       </div>
-      <button class="mod-btn" onclick="verifyCfg()">Verificar Clave</button>
-      <div style="margin-top:14px;background:rgba(212,168,67,.06);border:1px solid rgba(212,168,67,.14);border-radius:8px;padding:10px 13px;font-size:.72rem;color:rgba(212,168,67,.7);">
-        🛡️ Sistema protegido · Bloqueo automático tras 3 intentos fallidos
+      <input class="mod-inp" type="text" id="cfg-code" placeholder="Código de 6 dígitos" inputmode="numeric" autocomplete="one-time-code" maxlength="7" style="text-align:center;letter-spacing:.3em;font-size:1.2rem;" onkeypress="if(event.key==='Enter')verifyCfg()">
+      <div id="cfg-captcha" style="margin:2px 0 10px;min-height:0;"></div>
+      <button class="mod-btn" id="cfg-btn" onclick="verifyCfg()">Entrar</button>
+      <div style="margin-top:14px;background:rgba(212,168,67,.06);border:1px solid rgba(212,168,67,.14);border-radius:8px;padding:10px 13px;font-size:.72rem;color:rgba(212,168,67,.7);line-height:1.5;">
+        🛡️ Acceso protegido: clave + código de tu app, con bloqueo automático tras varios intentos fallidos. Si perdiste el teléfono, la recuperación se hace desde tu cuenta de Netlify (ver guía).
       </div>
-      <!-- Enlace para recuperación de emergencia -->
-      <button onclick="mostrarRecuperacionEmergencia()" style="width:100%;margin-top:10px;background:transparent;border:none;color:rgba(255,255,255,.28);
-        font-size:.7rem;cursor:pointer;text-decoration:underline;padding:4px;">
-        ¿Cuenta bloqueada o clave olvidada?
-      </button>
-    </div>
-
-    <!-- Panel de recuperación de emergencia -->
-    <div id="cfg-recuperacion" style="display:none;">
-      <div style="background:rgba(224,112,112,.08);border:1px solid rgba(224,112,112,.25);border-radius:10px;padding:16px;margin-bottom:14px;">
-        <div style="font-size:.72rem;font-weight:700;color:#e07070;margin-bottom:8px;">🔓 Recuperación de acceso</div>
-        <div style="font-size:.72rem;color:rgba(255,255,255,.5);line-height:1.6;margin-bottom:12px;">
-          Ingresa el <strong style="color:#f0c674;">código de recuperación</strong> para restablecer el acceso
-          y definir una nueva clave. Este código está en tu contrato y en la GUIA_ADMIN.
-        </div>
-        <div style="background:rgba(0,0,0,.3);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:.68rem;color:rgba(255,255,255,.4);line-height:1.6;">
-          🔒 Por seguridad, el código no se muestra aquí. Consulta tu
-          <strong style="color:#f0c674;">Guía de Administrador</strong> (descargable desde
-          Config → "📄 Exportar GUIA_ADMIN") o tu contrato firmado.
-        </div>
-        <input class="mod-inp" type="text" id="rec-codigo-inp" placeholder="Ingresa el código de recuperación" style="text-transform:uppercase;letter-spacing:.08em;" onkeypress="if(event.key==='Enter')verificarCodigoRecuperacion()">
-        <div id="rec-nueva-clave-bloque" style="display:none;margin-top:12px;">
-          <div style="font-size:.72rem;color:rgba(149,213,178,.7);margin-bottom:8px;">✅ Código correcto. Ingresa tu nueva clave:</div>
-          <input class="mod-inp" type="password" id="rec-nueva-clave" placeholder="Nueva clave (mín. 8 caracteres)" style="margin-bottom:8px;">
-          <input class="mod-inp" type="password" id="rec-confirma-clave" placeholder="Confirmar nueva clave">
-          <div id="rec-msg" style="display:none;font-size:.72rem;margin-top:6px;"></div>
-          <button onclick="aplicarNuevaClave()" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#2d6a4f,#52b788);
-            border:none;border-radius:9px;padding:11px;color:white;font-weight:700;
-            font-size:.82rem;cursor:pointer;">
-            🔑 Establecer nueva clave y desbloquear
-          </button>
-        </div>
-        <div id="rec-err" style="display:none;font-size:.72rem;color:#e07070;margin-top:8px;"></div>
-        <button onclick="verificarCodigoRecuperacion()" id="btn-verificar-rec" style="width:100%;margin-top:8px;background:rgba(224,112,112,.15);
-          border:1px solid rgba(224,112,112,.3);border-radius:9px;padding:10px;
-          color:#e07070;font-weight:700;font-size:.82rem;cursor:pointer;">
-          Verificar código
-        </button>
-      </div>
-      <button onclick="ocultarRecuperacionEmergencia()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,.1);
-        color:rgba(255,255,255,.35);border-radius:9px;padding:8px;cursor:pointer;font-size:.76rem;">
-        ← Volver al login
-      </button>
-    </div>
-
-    <!-- Grupo 2FA -->
-    <div id="cfg-2fa-grupo" style="display:none;">
-      <div style="background:rgba(82,183,136,.07);border:1px solid rgba(82,183,136,.2);border-radius:10px;padding:16px;margin-bottom:14px;text-align:center;">
-        <div style="font-size:.72rem;color:rgba(255,255,255,.45);margin-bottom:6px;">📱 Verificación en dos pasos</div>
-        <div style="font-size:.68rem;color:rgba(255,255,255,.35);margin-bottom:10px;">Tu código de acceso temporal es:</div>
-        <div id="cfg-2fa-code-display" style="font-family:'Space Mono',monospace;font-size:2rem;color:#52b788;font-weight:700;letter-spacing:.25em;background:rgba(0,0,0,.3);border-radius:8px;padding:10px;"></div>
-        <div style="font-size:.62rem;color:rgba(255,255,255,.3);margin-top:8px;">⏱️ En producción este código llegaría a tu celular/email</div>
-      </div>
-      <div class="mod-err" id="cfg-2fa-err" style="display:none;">❌ Código incorrecto.</div>
-      <input class="mod-inp" type="text" id="cfg-2fa-inp" placeholder="Ingresa el código de 6 dígitos" maxlength="6" style="text-align:center;letter-spacing:.3em;font-size:1.2rem;" onkeypress="if(event.key==='Enter')verificar2FA()">
-      <button class="mod-btn" onclick="verificar2FA()">✅ Confirmar Acceso</button>
-      <button onclick="cancelar2FA()" style="width:100%;margin-top:8px;background:transparent;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.4);border-radius:9px;padding:10px;cursor:pointer;font-size:.8rem;">← Volver a ingresar clave</button>
     </div>
   </div>
 </div>
@@ -2528,35 +2470,23 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
         </div>
       </div>
 
-      <!-- ── SECCIÓN: SEGURIDAD — CAMBIO DE CLAVE ── -->
+      <!-- ── SECCIÓN: SEGURIDAD DE ACCESO (v61) ── -->
       <div style="background:rgba(255,255,255,.03);border:1px solid rgba(212,168,67,.2);border-radius:12px;padding:18px;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
           <span style="font-size:1rem;">🔐</span>
-          <h4 style="color:#d4a843;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Cambio de Clave Admin</h4>
+          <h4 style="color:#d4a843;font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Seguridad de acceso</h4>
         </div>
-        <div class="adm-cfg">
-          <div class="adm-cf">
-            <label>Clave actual</label>
-            <input type="password" id="adm-pwd-actual" placeholder="Ingresa la clave actual">
-          </div>
-          <div class="adm-cf">
-            <label>Clave nueva</label>
-            <input type="password" id="adm-pwd-nueva" placeholder="Mínimo 8 caracteres">
-          </div>
-          <div class="adm-cf">
-            <label>Confirmar clave nueva</label>
-            <input type="password" id="adm-pwd-confirma" placeholder="Repite la clave nueva">
-          </div>
-        </div>
-        <div id="pwd-msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:.78rem;"></div>
-        <button onclick="cambiarClaveAdmin()" style="margin-top:12px;background:rgba(212,168,67,.15);border:1px solid rgba(212,168,67,.4);
-          color:#d4a843;border-radius:9px;padding:10px 20px;font-size:.82rem;font-weight:700;cursor:pointer;
-          transition:all .2s;" onmouseover="this.style.background='rgba(212,168,67,.25)'" onmouseout="this.style.background='rgba(212,168,67,.15)'">
-          🔑 Cambiar Clave
-        </button>
-        <p style="font-size:.68rem;color:rgba(255,255,255,.25);margin-top:8px;line-height:1.5;">
-          ⚠️ Al cambiar la clave usa "Exportar HTML" para que quede permanente en el archivo.
+        <p style="font-size:.76rem;color:rgba(255,255,255,.55);line-height:1.6;margin-bottom:10px;">
+          Tu acceso usa <strong style="color:#f0c674;">clave + código de la app autenticadora</strong>, verificados en el servidor.
+          La sesión caduca tras 30 minutos sin actividad. Los cambios delicados (cuenta bancaria, precios, borrar,
+          confirmar pagos) piden un código nuevo. La clave y el código secreto se cambian en Netlify
+          (ver <em>GUIA_SEGURIDAD_ADMIN_v61</em>); ya no existen en este archivo.
         </p>
+        <button onclick="verAccesosAdmin()" style="background:rgba(212,168,67,.15);border:1px solid rgba(212,168,67,.4);
+          color:#d4a843;border-radius:9px;padding:10px 20px;font-size:.82rem;font-weight:700;cursor:pointer;">
+          📋 Ver accesos recientes
+        </button>
+        <div id="adm-accesos" style="display:none;margin-top:12px;font-size:.72rem;line-height:1.7;color:rgba(255,255,255,.6);"></div>
       </div>
 
       <!-- ── SECCIÓN: LIMPIEZA DE DATOS DE PRUEBA ── -->
@@ -2631,7 +2561,7 @@ Nuestro horario de atención es lunes a sábado de 8am a 5pm. Tu mensaje quedar�
       <div style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:.7rem;color:rgba(255,255,255,.35);">
         <span style="color:rgba(149,213,178,.55);text-transform:uppercase;letter-spacing:.08em;font-weight:700;">🔍 Huella de este archivo</span>
         · Versión <span id="verif-version"></span> · Build <span id="verif-build"></span>
-        · Hash de clave admin (primeros 8 car.): <span id="verif-pwd-hash" style="font-family:'Space Mono',monospace;color:#d4a843;">calculando…</span>
+        · Clave de administrador: <span id="verif-pwd-hash" style="font-family:'Space Mono',monospace;color:#d4a843;">calculando…</span>
         <br><span style="opacity:.8;">Compara estos 3 valores entre dos copias del archivo para confirmar que son exactamente la misma versión.</span>
       </div>
 
@@ -2718,6 +2648,12 @@ function escapeHtml(str){
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
+// v61: valor de texto seguro para usar COMO ARGUMENTO dentro de un onclick="...".
+// escapeHtml() NO basta ahí: el navegador des-escapa &#39; antes de ejecutar el JS,
+// de modo que un nombre como  x');robar();//  se ejecutaba al pulsar el botón.
+// JSON.stringify produce un texto JS válido (comillas, \ y saltos de línea escapados)
+// y escapeHtml lo protege como atributo HTML. Uso:  onclick="f(${jsStr(a.nom)})"
+function jsStr(v){ return escapeHtml(JSON.stringify(String(v==null?'':v))); }
 // Prepara un valor para insertarlo como campo CSV: dobla comillas internas
 // (evita romper la fila) y antepone un apóstrofo cuando el valor empieza con
 // =,+,-,@ o tab/CR (evita que Excel/Sheets lo interprete como fórmula si
@@ -2887,7 +2823,7 @@ async function mostrarConfirmacionDesdeURL(gdnId, nombreParam){
         <strong style="color:rgba(255,255,255,.6);font-size:.78rem;font-family:'Space Mono',monospace;">${txIdSeg}</strong>
       </div>` : ''}
     </div>
-    <button onclick="abrirCertificadoAdoptante('${gdnLabel}')"
+    <button onclick="abrirCertificadoAdoptante(${jsStr((guardianNom||'Guardián') + ' ' + gdnId)})"
       style="width:100%;margin-top:14px;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;
       border-radius:10px;padding:13px;color:#1a3a2a;font-weight:700;font-size:.86rem;cursor:pointer;">
       📜 Ver mi Certificado Digital
@@ -3957,7 +3893,7 @@ function renderAdpResumen(){
       </div>
       <div style="display:flex;justify-content:space-between;font-size:.8rem;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">
         <span style="color:rgba(255,255,255,.45);">Guardián</span>
-        <span style="color:#95d5b2;font-weight:600;">${gdn.nom} (${gdn.id})</span>
+        <span style="color:#95d5b2;font-weight:600;">${escapeHtml(gdn.nom)} (${escapeHtml(gdn.id)})</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:.8rem;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">
         <span style="color:rgba(255,255,255,.45);">Primer pago</span>
@@ -4234,15 +4170,15 @@ function llenarDatosPrueba(met){
 // Al lanzar una nueva versión, actualizar SOLO estas líneas:
 // se propaga automáticamente a los archivos exportados y al pie de página.
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION     = 'v60';
-const APP_VERSION_NUM = '60.0';
+const APP_VERSION     = 'v61';
+const APP_VERSION_NUM = '61.0';
 // BUILD_ID: huella única de esta construcción exacta del archivo.
 // Sirve para verificar de un vistazo que el HTML suelto, el que va
 // dentro del ZIP para Netlify, y el que ya está desplegado, son
 // EXACTAMENTE el mismo archivo. Si dos copias muestran un BUILD_ID
 // distinto en el pie de página, no son la misma versión aunque el
 // número de versión (arriba) coincida.
-const BUILD_ID = '20261015-1800';
+const BUILD_ID = '20261107-2000';
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE — persistencia real de guardianes/adopciones (opcional)
@@ -4419,16 +4355,22 @@ async function buscarGuardianEnSupabase(id){
 // de guardianes.nombre_adoptante/email_adoptante/telefono/direccion/cedula/
 // clave — ver la sección 3 de GUIA_SEGURIDAD_SUPABASE_v3.sql.
 
-let ADMIN_PASS_PLANO_SESION = null; // contraseña en texto plano, SOLO en memoria de esta sesión — nunca en localStorage
-
-async function llamarFuncionAdmin(accion, payload){
-  if(!ADMIN_PASS_PLANO_SESION) throw new Error('No hay una sesión de administrador activa para sincronizar con el servidor.');
+// v61: ya no existe ninguna clave en memoria. La sesión vive en una cookie HttpOnly que
+// el navegador envía solo; este código nunca la ve. Si el servidor pide confirmar con un
+// código de la app (cambios delicados), se muestra el recuadro y se reintenta una vez.
+async function llamarFuncionAdmin(accion, payload, _reintento){
   const resp = await fetch('/.netlify/functions/admin-adoptantes', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ clave: ADMIN_PASS_PLANO_SESION, accion, ...payload }),
+    credentials: 'same-origin',
+    body: JSON.stringify({ accion, ...payload }),
   });
   const datos = await resp.json().catch(()=>({}));
+  if(resp.status===401 && datos.codigo==='sesion'){ sesionVencidaAdmin(); throw new Error('Tu sesión de administrador venció. Entra de nuevo.'); }
+  if(resp.status===403 && datos.codigo==='stepup' && !_reintento){
+    if(await confirmarConCodigo()) return llamarFuncionAdmin(accion, payload, true);
+    throw new Error('Cambio cancelado: falta confirmar con el código de tu app.');
+  }
   if(!resp.ok) throw new Error(datos.error || `Error del servidor (${resp.status}).`);
   return datos;
 }
@@ -4959,97 +4901,6 @@ const EMAILJS_CFG = {
 
 // Validaciones de seguridad por método de pago
 // ═══════════════════════════════════════════════════════
-// RECUPERACIÓN DE EMERGENCIA — DESBLOQUEO ADMIN
-// ═══════════════════════════════════════════════════════
-// El código de recuperación tampoco se guarda en texto plano: solo su hash SHA-256.
-// El valor real está documentado ÚNICAMENTE en la Guía de Administrador descargable
-// (botón "📄 Exportar GUIA_ADMIN actualizada") y en el contrato — nunca en pantalla ni en el código fuente.
-const CODIGO_RECUPERACION_HASH = 'f4daab9722f3893c9da4ed5c98c4bce9243ddd191c1d3bd3e55d1d4de7bb6b11';
-
-function mostrarRecuperacionEmergencia(){
-  const pwdGrp = document.getElementById('cfg-pwd-grupo');
-  const recGrp = document.getElementById('cfg-recuperacion');
-  if(pwdGrp) pwdGrp.style.display = 'none';
-  if(recGrp) recGrp.style.display = 'block';
-  document.getElementById('cfg-err').style.display = 'none';
-  setTimeout(()=>document.getElementById('rec-codigo-inp')?.focus(), 150);
-}
-
-function ocultarRecuperacionEmergencia(){
-  const pwdGrp = document.getElementById('cfg-pwd-grupo');
-  const recGrp = document.getElementById('cfg-recuperacion');
-  if(pwdGrp) pwdGrp.style.display = 'block';
-  if(recGrp) recGrp.style.display = 'none';
-  // Limpiar campos
-  const inp = document.getElementById('rec-codigo-inp');
-  if(inp) inp.value = '';
-  document.getElementById('rec-nueva-clave-bloque').style.display = 'none';
-  document.getElementById('rec-err').style.display = 'none';
-  document.getElementById('btn-verificar-rec').style.display = 'block';
-}
-
-async function verificarCodigoRecuperacion(){
-  const inp   = document.getElementById('rec-codigo-inp');
-  const errEl = document.getElementById('rec-err');
-  const codigo = inp?.value.trim().toUpperCase();
-  const codigoHash = await sha256Hex(codigo);
-
-  if(codigoHash !== CODIGO_RECUPERACION_HASH){
-    if(errEl){errEl.style.display='block'; errEl.textContent='❌ Código incorrecto. Revisa tu GUIA_ADMIN o contrato.';}
-    return;
-  }
-  // Código correcto: mostrar campos de nueva clave
-  errEl.style.display = 'none';
-  document.getElementById('rec-nueva-clave-bloque').style.display = 'block';
-  document.getElementById('btn-verificar-rec').style.display = 'none';
-  inp.disabled = true;
-  setTimeout(()=>document.getElementById('rec-nueva-clave')?.focus(), 150);
-}
-
-async function aplicarNuevaClave(){
-  const nueva    = document.getElementById('rec-nueva-clave')?.value.trim();
-  const confirma = document.getElementById('rec-confirma-clave')?.value.trim();
-  const msgEl    = document.getElementById('rec-msg');
-
-  function showMsg(txt, ok){
-    if(!msgEl) return;
-    msgEl.style.display = 'block';
-    msgEl.style.color   = ok ? '#52b788' : '#e07070';
-    msgEl.textContent   = txt;
-  }
-
-  if(!nueva || nueva.length < 8){
-    showMsg('❌ La nueva clave debe tener al menos 8 caracteres.', false); return;
-  }
-  if(nueva !== confirma){
-    showMsg('❌ Las claves no coinciden. Verifica.', false); return;
-  }
-
-  // Aplicar nueva clave — solo se guarda el hash, nunca el texto plano
-  ADMIN_PASS_HASH_ACTUAL = await sha256Hex(nueva);
-  try{
-    localStorage.setItem('escondida_admin_pass_hash', ADMIN_PASS_HASH_ACTUAL);
-  }catch(e){}
-
-  // Desbloquear completamente
-  loginIntentos    = 0;
-  loginBloqueado   = false;
-  loginBloqueadoHasta = 0;
-
-  showMsg('✅ Clave actualizada y cuenta desbloqueada.', true);
-
-  // Cerrar modal y redirigir al login con la nueva clave
-  setTimeout(()=>{
-    closeMod('mod-cfg');
-    ocultarRecuperacionEmergencia();
-    renderLoginSeguridad();
-    showNotif('🔑 Clave actualizada. Ingresa con tu nueva clave.');
-    // Reabrir el modal para que el admin inicie sesión
-    setTimeout(()=>abrirAdmin(), 800);
-  }, 1800);
-}
-
-// ═══════════════════════════════════════════════════════
 // PAGO EN EFECTIVO — VALIDACIÓN Y RECIBO
 // ═══════════════════════════════════════════════════════
 function validarCamposPago(met){
@@ -5095,7 +4946,9 @@ function validarCamposPago(met){
 
 // ═══ RECIBO DE PAGO EN EFECTIVO ═══════════════════════
 function generarReciboEfectivo(datos){
-  const {nom, cc, tel, gdn, C, txId, hoy, ciu} = datos;
+  const {gdn, C, hoy} = datos;
+  // v61: todo texto que viene del formulario se escapa antes de entrar a la plantilla HTML
+  const nom = escapeHtml(datos.nom), cc = escapeHtml(datos.cc), tel = escapeHtml(datos.tel), ciu = escapeHtml(datos.ciu), txId = escapeHtml(datos.txId);
   const montoPagado    = datos.montoPagado    || C.primerPago;
   const mesPagado      = datos.mesPagado      || 1;
   const conceptoPagado = datos.conceptoPagado || 'Lechón + Concentrado + Admin';
@@ -5153,7 +5006,7 @@ function generarReciboEfectivo(datos){
 
 <div class="seccion">
   <h3>Guardián Adoptado</h3>
-  <div class="fila"><span class="lbl">Nombre del guardián</span><span class="val">${gdn.nom}</span></div>
+  <div class="fila"><span class="lbl">Nombre del guardián</span><span class="val">${escapeHtml(gdn.nom)}</span></div>
   <div class="fila"><span class="lbl">ID de registro</span><span class="val">${gdn.id}</span></div>
   <div class="fila"><span class="lbl">Duración del ciclo</span><span class="val">${C.meses} meses</span></div>
 </div>
@@ -5897,271 +5750,195 @@ function initThumbCanvas(id,colA,colB){
   })();
 }
 
-// ═══ ADMIN — SEGURIDAD MEJORADA (v34: hash SHA-256, sin claves en texto plano) ═══
+// ═══ ADMIN — ACCESO SEGURO (v61) ═══
+// Todo se verifica en el SERVIDOR (netlify/functions/admin-login.js):
+//   clave + código de 6 dígitos de la app autenticadora (+ captcha si está activo).
+// Si es correcto, el servidor entrega una cookie de sesión HttpOnly: este JavaScript
+// no puede leerla y la clave NO se guarda ni se vuelve a enviar. No queda ningún
+// hash de clave en este archivo.
 let adminAuth=false;
+let _captchaToken=null, _captchaId=null, _loginEnCurso=false, _stepupP=null;
 
-// La clave NUNCA se guarda en texto plano en el código ni en localStorage.
-// Solo se guarda su huella SHA-256 (hash). Verificar = comparar hash(intento) con el hash guardado.
-// ⚠️ Ver el README de esta versión — la clave por defecto documentada allí DEBE cambiarse
-// desde el panel "Cambio de Clave Admin" en el primer despliegue, porque el
-// valor por defecto ha sido usado en versiones previas de este proyecto.
-const ADMIN_PASS_HASH_DEFAULT = '9b33e5bddde96d0b260027886953e38b5b35a112a36965f4049c92388be1c80a';
-
-// SHA-256 con respaldo en JS puro para cuando crypto.subtle no está disponible
-// (esto ocurre al abrir el archivo directamente con file:// en algunos navegadores,
-// que no lo tratan como "contexto seguro"). Ambas rutas producen EXACTAMENTE el
-// mismo resultado — se verificó con más de 9 casos de prueba, incluidos textos
-// con tildes/ñ, chino, emojis y contraseñas largas.
-async function sha256Hex(texto){
-  if(window.crypto && window.crypto.subtle && window.crypto.subtle.digest){
-    try{
-      const buf  = new TextEncoder().encode(texto);
-      const hash = await window.crypto.subtle.digest('SHA-256', buf);
-      return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
-    }catch(e){
-      console.warn('crypto.subtle falló, usando respaldo en JS puro:', e);
-    }
-  }
-  return sha256Puro(texto);
-}
-
-// Implementación SHA-256 en JS puro (sin dependencias externas) — solo se usa
-// cuando el navegador no ofrece crypto.subtle (contexto no seguro, ej. file://).
-function sha256Puro(texto){
-  const bytes = new TextEncoder().encode(texto);
-  function rr(v,n){ return (v>>>n) | (v<<(32-n)); }
-  const K = [
-    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-  ];
-  let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
-  const msgLen = bytes.length;
-  const bitLen = msgLen * 8;
-  let totalLen = msgLen + 1;
-  while (totalLen % 64 !== 56) totalLen++;
-  totalLen += 8;
-  const padded = new Uint8Array(totalLen);
-  padded.set(bytes);
-  padded[msgLen] = 0x80;
-  const hi = Math.floor(bitLen / 0x100000000);
-  const lo = bitLen >>> 0;
-  const dv = new DataView(padded.buffer);
-  dv.setUint32(totalLen-8, hi, false);
-  dv.setUint32(totalLen-4, lo, false);
-  const w = new Uint32Array(64);
-  for(let offset=0; offset<totalLen; offset+=64){
-    for(let i=0;i<16;i++) w[i]=dv.getUint32(offset+i*4,false);
-    for(let i=16;i<64;i++){
-      const w15=w[i-15], w2=w[i-2];
-      const s0=rr(w15,7)^rr(w15,18)^(w15>>>3);
-      const s1=rr(w2,17)^rr(w2,19)^(w2>>>10);
-      w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
-    }
-    let [a,b,c,d,e,f,g,h]=H;
-    for(let i=0;i<64;i++){
-      const S1=rr(e,6)^rr(e,11)^rr(e,25);
-      const ch=(e&f)^(~e&g);
-      const t1=(h+S1+ch+K[i]+w[i])|0;
-      const S0=rr(a,2)^rr(a,13)^rr(a,22);
-      const maj=(a&b)^(a&c)^(b&c);
-      const t2=(S0+maj)|0;
-      h=g; g=f; f=e; e=(d+t1)|0;
-      d=c; c=b; b=a; a=(t1+t2)|0;
-    }
-    H=[(H[0]+a)|0,(H[1]+b)|0,(H[2]+c)|0,(H[3]+d)|0,(H[4]+e)|0,(H[5]+f)|0,(H[6]+g)|0,(H[7]+h)|0];
-  }
-  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
-}
-
-// ADMIN_PASS_HASH_ACTUAL: hash guardado en localStorage o el hash por defecto.
-// Migración automática: si existe una clave en texto plano de una versión anterior
-// (escondida_admin_pass), se hashea una sola vez, se guarda como hash y se borra el texto plano.
-let ADMIN_PASS_HASH_ACTUAL = (()=>{
-  try{ return localStorage.getItem('escondida_admin_pass_hash') || ADMIN_PASS_HASH_DEFAULT; }
-  catch(e){ return ADMIN_PASS_HASH_DEFAULT; }
+// Limpieza de restos de versiones anteriores (hashes/clave guardados en este navegador)
+(function limpiarRastrosAntiguosDeClave(){
+  try{ ['escondida_admin_pass_hash','escondida_admin_pass','escondida_pass_changed'].forEach(k=>localStorage.removeItem(k)); }catch(e){}
 })();
 
-(async function migrarClaveTextoPlanoAntigua(){
+async function apiAdminLogin(accion, datos){
+  const r = await fetch('/.netlify/functions/admin-login', {
+    method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+    body: JSON.stringify({ accion, ...(datos||{}) }),
+  });
+  const j = await r.json().catch(()=>({}));
+  return { ...j, status:r.status, ok: r.ok && j.ok===true };
+}
+
+function mostrarErrorLogin(msg){
+  const e=document.getElementById('cfg-err'); if(!e) return;
+  e.textContent = msg ? '❌ '+msg : '';
+  e.style.display = msg ? 'block' : 'none';
+}
+
+// Captcha de Cloudflare Turnstile: solo aparece si el servidor lo tiene activado
+async function prepararCaptcha(){
+  const cont=document.getElementById('cfg-captcha'); if(!cont) return;
   try{
-    const legacyPlano = localStorage.getItem('escondida_admin_pass');
-    const legacyFlag   = localStorage.getItem('escondida_pass_changed');
-    if(legacyFlag === 'true' && legacyPlano && legacyPlano.length >= 6){
-      ADMIN_PASS_HASH_ACTUAL = await sha256Hex(legacyPlano);
-      localStorage.setItem('escondida_admin_pass_hash', ADMIN_PASS_HASH_ACTUAL);
-      localStorage.removeItem('escondida_admin_pass');       // borrar texto plano
-      localStorage.removeItem('escondida_pass_changed');      // flag obsoleto
+    const est = await apiAdminLogin('estado');
+    if(!est.captcha_sitekey){ _captchaToken=null; return; }
+    if(!window.turnstile){
+      await new Promise((res,rej)=>{
+        const sc=document.createElement('script');
+        sc.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        sc.async=true; sc.onload=res; sc.onerror=rej; document.head.appendChild(sc);
+      });
     }
-  }catch(e){}
-})();
+    if(_captchaId!==null){ window.turnstile.reset(_captchaId); _captchaToken=null; return; }
+    _captchaId = window.turnstile.render(cont, {
+      sitekey: est.captcha_sitekey, theme:'dark',
+      callback:t=>{ _captchaToken=t; }, 'expired-callback':()=>{ _captchaToken=null; }, 'error-callback':()=>{ _captchaToken=null; },
+    });
+  }catch(e){ console.warn('No se pudo preparar el captcha:', e); }
+}
+function reiniciarCaptcha(){
+  _captchaToken=null;
+  try{ if(_captchaId!==null && window.turnstile) window.turnstile.reset(_captchaId); }catch(e){}
+}
 
-let loginIntentos=0;
-let loginBloqueado=false;
-let loginBloqueadoHasta=0;
-let admin2FACode='';
-let admin2FAPendiente=false;
+function renderLoginSeguridad(){ const i=document.getElementById('cfg-login-info'); if(i) i.innerHTML=''; }
 
-function abrirAdmin(){
+async function abrirAdmin(){
   if(adminAuth){document.getElementById('admin-overlay').classList.add('open');renderAdmDash();actualizarHuellaVerificacion();verificarPagosRechazados(false);cargarAdoptantesDesdeSupabase();return;}
+  // ¿Sigue vigente una sesión anterior (cookie)? Entonces no hace falta pedir la clave otra vez
+  let r={ok:false}; try{ r=await apiAdminLogin('sesion'); }catch(e){}
+  if(r.ok){ completarLoginAdmin(false); return; }
   openMod('mod-cfg');
   setTimeout(()=>document.getElementById('cfg-pwd')?.focus(),200);
   renderLoginSeguridad();
+  prepararCaptcha();
 }
 function openCfgModal(){openMod('mod-cfg');}
 
-function renderLoginSeguridad(){
-  const info=document.getElementById('cfg-login-info');
-  if(!info)return;
-  const ahora=Date.now();
-  if(loginBloqueado&&ahora<loginBloqueadoHasta){
-    const seg=Math.ceil((loginBloqueadoHasta-ahora)/1000);
-    info.innerHTML=`<div style="background:rgba(224,112,112,.12);border:1px solid rgba(224,112,112,.3);border-radius:8px;padding:8px 12px;font-size:.75rem;color:#e07070;margin-bottom:10px;">
-      🔒 Acceso bloqueado por ${seg} segundos. Demasiados intentos fallidos.</div>`;
-    setTimeout(renderLoginSeguridad,1000);
-  } else {
-    loginBloqueado=false;
-    if(loginIntentos>0){
-      info.innerHTML=`<div style="background:rgba(212,168,67,.08);border:1px solid rgba(212,168,67,.2);border-radius:8px;padding:7px 12px;font-size:.72rem;color:#d4a843;margin-bottom:10px;">
-        ⚠️ Intento ${loginIntentos}/3. ${3-loginIntentos} intentos restantes.</div>`;
-    } else {
-      info.innerHTML='';
-    }
-  }
-}
-
 async function verifyCfg(){
-  const ahora = Date.now();
-  // Bloqueo temporal tras 3 intentos fallidos
-  if(loginBloqueado && ahora < loginBloqueadoHasta){
-    const seg = Math.ceil((loginBloqueadoHasta-ahora)/1000);
-    showNotif('🔒 Bloqueado. Espera '+seg+' segundos.');
-    return;
-  }
-
-  const inp = document.getElementById('cfg-pwd');
-  if(!inp) return;
-  const v = inp.value; // NO usar trim() — respetar la clave exacta
-  const errEl = document.getElementById('cfg-err');
-  const vHash = await sha256Hex(v);
-
-  if(vHash === ADMIN_PASS_HASH_ACTUAL){
-    // ✅ Clave correcta — acceso directo sin 2FA
-    loginIntentos = 0;
-    ADMIN_PASS_PLANO_SESION = v; // en memoria — necesaria para sincronizar con Supabase (nunca se guarda en localStorage)
-    inp.value = '';
-    if(errEl) errEl.style.display = 'none';
-    adminAuth = true;
-    closeMod('mod-cfg');
-    // Ocultar 2FA si estaba visible
-    const pwdGrp = document.getElementById('cfg-pwd-grupo');
-    const tfaGrp = document.getElementById('cfg-2fa-grupo');
-    if(pwdGrp) pwdGrp.style.display = 'block';
-    if(tfaGrp) tfaGrp.style.display = 'none';
-    admin2FAPendiente = false;
-    // Abrir panel admin
-    document.getElementById('admin-overlay').classList.add('open');
-    const navBtn = document.getElementById('nav-admin-btn');
-    if(navBtn){ navBtn.textContent = '⚙️ Admin'; navBtn.classList.add('active'); }
-    renderAdmDash();
-    renderPlanilla();
-    renderAdmLechones();
-    renderLechones();
-    actualizarHuellaVerificacion();
-    verificarAdoptantesHuerfanosAlAbrir();
-    verificarPagosRechazados(true);
-    cargarConfigDesdeSupabase().then(ok=>{ if(ok){ restaurarDesdeLocalStorage(); renderAdmDash(); } })
-      .then(()=>cargarAdoptantesDesdeSupabase())     // planilla (después de restaurar, para no pisarla)
-      .then(()=>cargarFinanzasDesdeServidor())       // v57: cuotas, contabilidad, por verificar
-      .then(()=>{ cargarDisponibilidadDesdeSupabase(); avisarPagosPorVerificar(); });
-    showNotif('✅ Sesión de administración iniciada.');
-  } else {
-    // ❌ Clave incorrecta
-    loginIntentos++;
-    inp.value = '';
-    inp.focus();
-    if(loginIntentos >= 3){
-      loginBloqueado = true;
-      loginBloqueadoHasta = Date.now() + 30000;
-      loginIntentos = 0;
-      if(errEl){ errEl.textContent='🔒 Demasiados intentos. Bloqueado 30 seg.'; errEl.style.display='block'; }
-      setTimeout(()=>{
-        loginBloqueado = false;
-        if(errEl) errEl.style.display = 'none';
-        renderLoginSeguridad();
-      }, 30000);
-    } else {
-      if(errEl){
-        errEl.textContent = '❌ Clave incorrecta. Intento '+loginIntentos+' de 3.';
-        errEl.style.display = 'block';
-      }
+  if(_loginEnCurso) return;
+  const inp=document.getElementById('cfg-pwd'), cod=document.getElementById('cfg-code'), btn=document.getElementById('cfg-btn');
+  if(!inp||!cod) return;
+  const clave=inp.value; // NO usar trim() — respetar la clave exacta
+  const codigo=cod.value.replace(/\s/g,'');
+  if(!clave){ mostrarErrorLogin('Escribe tu clave.'); inp.focus(); return; }
+  if(!/^\d{6}$/.test(codigo)){ mostrarErrorLogin('Escribe el código de 6 dígitos de tu app.'); cod.focus(); return; }
+  _loginEnCurso=true; if(btn){ btn.disabled=true; btn.textContent='Verificando…'; }
+  try{
+    const r = await apiAdminLogin('login', { clave, codigo, captcha:_captchaToken });
+    if(r.ok){
+      inp.value=''; cod.value=''; mostrarErrorLogin('');
+      closeMod('mod-cfg'); completarLoginAdmin(true);
+      return;
     }
-    renderLoginSeguridad();
+    mostrarErrorLogin(r.error || 'No se pudo entrar. Intenta de nuevo.');
+    cod.value=''; if(r.status===401 && r.codigo!=='totp_usado') inp.value='';
+    reiniciarCaptcha();
+    (r.status===401 && r.codigo!=='totp_usado' ? inp : cod).focus();
+  }catch(e){
+    mostrarErrorLogin('Sin conexión con el servidor. Revisa tu internet e intenta de nuevo.');
+  }finally{
+    _loginEnCurso=false; if(btn){ btn.disabled=false; btn.textContent='Entrar'; }
   }
 }
 
-function iniciar2FA(){
-  // Generar código 6 dígitos
-  admin2FACode=String(Math.floor(100000+Math.random()*900000));
-  admin2FAPendiente=true;
-  // Mostrar sección 2FA
-  const pwdGrp=document.getElementById('cfg-pwd-grupo');
-  const tfaGrp=document.getElementById('cfg-2fa-grupo');
-  if(pwdGrp)pwdGrp.style.display='none';
-  if(tfaGrp)tfaGrp.style.display='block';
-  document.getElementById('cfg-2fa-code-display').textContent=admin2FACode;
-  setTimeout(()=>document.getElementById('cfg-2fa-inp')?.focus(),100);
-  showNotif('📱 Código de verificación generado');
+// Lo que se hace al quedar autenticado (entrada nueva o sesión restaurada)
+function completarLoginAdmin(nuevo){
+  adminAuth = true;
+  document.getElementById('admin-overlay').classList.add('open');
+  const navBtn = document.getElementById('nav-admin-btn');
+  if(navBtn){ navBtn.textContent = '⚙️ Admin'; navBtn.classList.add('active'); }
+  renderAdmDash();
+  renderPlanilla();
+  renderAdmLechones();
+  renderLechones();
+  actualizarHuellaVerificacion();
+  verificarAdoptantesHuerfanosAlAbrir();
+  verificarPagosRechazados(true);
+  cargarConfigDesdeSupabase().then(ok=>{ if(ok){ restaurarDesdeLocalStorage(); renderAdmDash(); } })
+    .then(()=>cargarAdoptantesDesdeSupabase())     // planilla (después de restaurar, para no pisarla)
+    .then(()=>cargarFinanzasDesdeServidor())       // v57: cuotas, contabilidad, por verificar
+    .then(()=>{ cargarDisponibilidadDesdeSupabase(); avisarPagosPorVerificar(); });
+  showNotif(nuevo ? '✅ Sesión de administración iniciada.' : '✅ Sesión de administración restaurada.');
 }
 
-function verificar2FA(){
-  const inp=document.getElementById('cfg-2fa-inp');
-  if(!inp)return;
-  const v=inp.value.trim();
-  const errEl=document.getElementById('cfg-2fa-err');
-  if(v===admin2FACode){
-    admin2FAPendiente=false;admin2FACode='';
-    adminAuth=true;inp.value='';
-    if(errEl)errEl.style.display='none';
-    closeMod('mod-cfg');
-    // Resetear formulario
-    const pwdGrp=document.getElementById('cfg-pwd-grupo');
-    const tfaGrp=document.getElementById('cfg-2fa-grupo');
-    if(pwdGrp)pwdGrp.style.display='block';
-    if(tfaGrp)tfaGrp.style.display='none';
-    document.getElementById('admin-overlay').classList.add('open');
-    { const nb=document.getElementById('nav-admin-btn'); if(nb){ nb.textContent='⚙️ Admin'; nb.classList.add('active'); } }
-    const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='block';
-    renderLechones();
-    renderAdmDash();renderPlanilla();renderAdmLechones();
-    verificarPagosRechazados(true);
-    showNotif('✅ Sesión admin iniciada con 2FA');
-  } else {
-    if(errEl){errEl.textContent='❌ Código incorrecto. Revisa el código generado.';errEl.style.display='block';}
-    inp.value='';inp.focus();
-  }
+// La sesión venció (30 min sin actividad o 8 h): se vuelve al login
+function sesionVencidaAdmin(){
+  adminAuth=false; cerrarAdmin();
+  const nb=document.getElementById('nav-admin-btn'); if(nb){ nb.textContent='⚙️ Admin'; nb.classList.remove('active'); }
+  const planEl=document.getElementById('planilla'); if(planEl) planEl.style.display='none';
+  showNotif('⚠️ Tu sesión venció. Entra de nuevo.');
+  setTimeout(()=>abrirAdmin(),400);
 }
-function cancelar2FA(){
-  admin2FAPendiente=false;admin2FACode='';
-  const pwdGrp=document.getElementById('cfg-pwd-grupo');
-  const tfaGrp=document.getElementById('cfg-2fa-grupo');
-  if(pwdGrp)pwdGrp.style.display='block';
-  if(tfaGrp)tfaGrp.style.display='none';
-  const errEl=document.getElementById('cfg-err');
-  if(errEl)errEl.style.display='none';
-  const inp=document.getElementById('cfg-2fa-inp');
-  if(inp)inp.value='';
-  setTimeout(()=>document.getElementById('cfg-pwd')?.focus(),100);
+
+// Confirmación con un código nuevo de la app (para cambios delicados). Devuelve true/false.
+function confirmarConCodigo(){
+  if(_stepupP) return _stepupP;
+  _stepupP = new Promise(resolve=>{
+    const div=document.createElement('div');
+    div.id='modal-stepup';
+    div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    div.innerHTML=`
+      <div style="background:#0d2a1c;border:2px solid rgba(212,168,67,.4);border-radius:16px;padding:26px;max-width:380px;width:100%;color:#f8f4e8;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:8px;">🔐</div>
+        <h3 style="color:#f0c674;font-family:'Playfair Display',serif;font-size:1.05rem;margin-bottom:8px;">Confirma este cambio</h3>
+        <p style="font-size:.78rem;color:rgba(255,255,255,.55);line-height:1.6;margin-bottom:14px;">
+          Por seguridad, escribe el código de 6 dígitos que muestra tu app autenticadora ahora.
+          Si ya lo usaste hace un momento, espera a que cambie.</p>
+        <input id="stepup-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000"
+          style="width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(212,168,67,.3);border-radius:8px;padding:11px;color:#f0c674;font-size:1.3rem;text-align:center;letter-spacing:.3em;font-family:'Space Mono',monospace;outline:none;margin-bottom:8px;">
+        <div id="stepup-err" style="min-height:1.1em;font-size:.74rem;color:#e07070;margin-bottom:10px;"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <button id="stepup-cancel" style="background:transparent;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.55);border-radius:9px;padding:11px;cursor:pointer;font-size:.82rem;">Cancelar</button>
+          <button id="stepup-ok" style="background:linear-gradient(135deg,#d4a843,#f0c674);border:none;border-radius:9px;padding:11px;color:#1a3a2a;font-weight:700;cursor:pointer;font-size:.84rem;">Confirmar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(div);
+    const inp=div.querySelector('#stepup-code'), err=div.querySelector('#stepup-err'), ok=div.querySelector('#stepup-ok');
+    const cerrar=v=>{ div.remove(); _stepupP=null; resolve(v); };
+    div.querySelector('#stepup-cancel').onclick=()=>cerrar(false);
+    const enviar=async()=>{
+      const c=inp.value.replace(/\s/g,'');
+      if(!/^\d{6}$/.test(c)){ err.textContent='Escribe los 6 dígitos.'; return; }
+      ok.disabled=true; err.textContent='';
+      try{
+        const r=await apiAdminLogin('stepup',{codigo:c});
+        if(r.ok) return cerrar(true);
+        if(r.codigo==='sesion'){ cerrar(false); sesionVencidaAdmin(); return; }
+        err.textContent=r.error||'Código incorrecto.'; inp.value=''; inp.focus();
+      }catch(e){ err.textContent='Sin conexión. Intenta de nuevo.'; }
+      ok.disabled=false;
+    };
+    ok.onclick=enviar; inp.onkeydown=e=>{ if(e.key==='Enter') enviar(); };
+    setTimeout(()=>inp.focus(),50);
+  });
+  return _stepupP;
+}
+
+// Últimos accesos y acciones delicadas (para detectar intentos ajenos)
+async function verAccesosAdmin(){
+  const el=document.getElementById('adm-accesos'); if(!el) return;
+  el.style.display='block'; el.textContent='Cargando…';
+  try{
+    const r=await apiAdminLogin('registro');
+    if(r.codigo==='sesion'){ sesionVencidaAdmin(); return; }
+    if(!r.ok) throw new Error(r.error||'No se pudo leer el registro.');
+    const nombres={ login_ok:'✅ Entrada', login_fallo:'⚠️ Intento fallido', login_captcha_fallo:'⚠️ Captcha fallido', login_codigo_repetido:'⚠️ Código repetido',
+      confirmar_ok:'✅ Cambio confirmado', confirmar_fallo:'⚠️ Confirmación fallida', accion:'🛠️ Acción' };
+    el.innerHTML = (r.registro||[]).length ? (r.registro||[]).map(f=>{
+      const t=new Date(f.ts).toLocaleString('es-CO',{timeZone:'America/Bogota',dateStyle:'short',timeStyle:'short'});
+      return `<div>${escapeHtml(t)} · ${escapeHtml(nombres[f.evento]||f.evento)}${f.detalle?': '+escapeHtml(f.detalle):''} · <span style="font-family:'Space Mono',monospace;color:rgba(255,255,255,.4);">${escapeHtml(f.ip||'')}</span></div>`;
+    }).join('') : 'Aún no hay registros.';
+  }catch(e){ el.textContent='❌ '+e.message; }
 }
 
 function cerrarAdmin(){document.getElementById('admin-overlay').classList.remove('open');}
 function cerrarSesionAdmin(){
   adminAuth=false;cerrarAdmin();
-  ADMIN_PASS_PLANO_SESION = null; // v55: no dejar la contraseña en memoria tras cerrar sesión
+  apiAdminLogin('salir').catch(()=>{}); // v61: el servidor borra la cookie de sesión
   const nb=document.getElementById('nav-admin-btn');
   if(nb){ nb.textContent='⚙️ Admin'; nb.classList.remove('active'); }
   const planEl=document.getElementById('planilla');if(planEl)planEl.style.display='none';
@@ -6225,14 +6002,14 @@ function renderAdmLechones(){
         color:#d4a843;padding:5px;border-radius:8px;font-size:.65rem;font-weight:700;cursor:pointer;margin-bottom:5px;">
         🔍 Ver Detalle
       </button>`:''}
-      <button onclick="toggleLechon('${l.id}')"
+      <button onclick="toggleLechon(${jsStr(l.id)})"
         style="width:100%;background:${l.on?'rgba(82,183,136,.14)':'rgba(224,112,112,.14)'};
         border:1px solid ${l.on?'rgba(82,183,136,.3)':'rgba(224,112,112,.3)'};
         color:${l.on?'#52b788':'#e07070'};padding:5px;border-radius:8px;
         font-size:.68rem;font-weight:700;cursor:pointer;margin-bottom:5px;">
         ${l.on?'● ON':'● OFF'}
       </button>
-      <button onclick="confirmarBorrarGuardian('${l.id}')"
+      <button onclick="confirmarBorrarGuardian(${jsStr(l.id)})"
         style="width:100%;background:rgba(224,112,112,.08);border:1px solid rgba(224,112,112,.2);
         color:#e07070;padding:4px;border-radius:8px;font-size:.62rem;cursor:pointer;">
         🗑️ Eliminar
@@ -6253,11 +6030,11 @@ function confirmarBorrarGuardian(id){
       <div style="font-size:2rem;margin-bottom:10px;">🗑️</div>
       <h3 style="color:#e07070;font-family:'Playfair Display',serif;margin-bottom:10px;">Eliminar Guardián</h3>
       <p style="color:rgba(255,255,255,.6);font-size:.82rem;margin-bottom:8px;">
-        ¿Eliminar a <strong style="color:#f8f4e8;">${l.nom}</strong> (${l.id})?</p>
+        ¿Eliminar a <strong style="color:#f8f4e8;">${escapeHtml(l.nom)}</strong> (${escapeHtml(l.id)})?</p>
       <p style="color:rgba(224,112,112,.7);font-size:.74rem;margin-bottom:18px;">
         Esta acción no se puede deshacer.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <button onclick="ejecutarBorrarGuardian('${id}')"
+        <button onclick="ejecutarBorrarGuardian(${jsStr(id)})"
           style="background:linear-gradient(135deg,#8b1a1a,#e07070);border:none;border-radius:9px;
           padding:11px;color:white;font-weight:700;font-size:.82rem;cursor:pointer;">
           ✅ Sí, eliminar
@@ -6488,7 +6265,7 @@ function restaurarDesdeLocalStorage(){
     }
   }catch(e){ console.warn('No se pudo restaurar config:', e); }
 
-  // La clave admin ya se restaura por hash (ADMIN_PASS_HASH_ACTUAL) al declarar la
+  // La clave admin ya no vive en este archivo (v61: se verifica en el servidor); antes se restauraba al declarar la
   // variable arriba, y la migración desde texto plano de versiones anteriores se
   // resuelve automáticamente en migrarClaveTextoPlanoAntigua(). No se requiere nada aquí.
 
@@ -6578,46 +6355,6 @@ function restaurarDesdeLocalStorage(){
 
 
 
-// ── CAMBIO DE CLAVE ADMIN ─────────────────────────────
-async function cambiarClaveAdmin(){
-  const actual    = document.getElementById('adm-pwd-actual')?.value.trim();
-  const nueva     = document.getElementById('adm-pwd-nueva')?.value.trim();
-  const confirma  = document.getElementById('adm-pwd-confirma')?.value.trim();
-  const msgEl     = document.getElementById('pwd-msg');
-
-  function showPwdMsg(txt, ok){
-    if(!msgEl) return;
-    msgEl.style.display='block';
-    msgEl.style.background = ok ? 'rgba(82,183,136,.12)' : 'rgba(224,112,112,.12)';
-    msgEl.style.border = ok ? '1px solid rgba(82,183,136,.3)' : '1px solid rgba(224,112,112,.3)';
-    msgEl.style.color = ok ? '#52b788' : '#e07070';
-    msgEl.textContent = txt;
-    if(ok) setTimeout(()=>msgEl.style.display='none', 3500);
-  }
-
-  // Validaciones
-  if(!actual){showPwdMsg('❌ Ingresa la clave actual.', false);return;}
-  const actualHash = await sha256Hex(actual);
-  if(actualHash !== ADMIN_PASS_HASH_ACTUAL){showPwdMsg('❌ La clave actual es incorrecta.', false);return;}
-  if(!nueva || nueva.length < 8){showPwdMsg('❌ La clave nueva debe tener al menos 8 caracteres.', false);return;}
-  if(nueva !== confirma){showPwdMsg('❌ Las claves nuevas no coinciden.', false);return;}
-  if(nueva === actual){showPwdMsg('❌ La clave nueva debe ser diferente a la actual.', false);return;}
-
-  // Aplicar cambio — solo se guarda el hash SHA-256, nunca la clave en texto plano
-  ADMIN_PASS_HASH_ACTUAL = await sha256Hex(nueva);
-  try{
-    localStorage.setItem('escondida_admin_pass_hash', ADMIN_PASS_HASH_ACTUAL);
-  } catch(e){}
-
-  // Limpiar campos
-  document.getElementById('adm-pwd-actual').value = '';
-  document.getElementById('adm-pwd-nueva').value = '';
-  document.getElementById('adm-pwd-confirma').value = '';
-
-  showPwdMsg('✅ Clave cambiada. Usa "Exportar HTML" para hacerla permanente.', true);
-  showNotif('🔑 Clave admin actualizada correctamente');
-}
-
 // ── EXPORTAR HTML CON TODOS LOS CAMBIOS EMBEBIDOS ─────
 // ═══════════════════════════════════════════════════
 // EXPORTAR HTML — lee el archivo fuente original via
@@ -6675,7 +6412,6 @@ function recogerCfgActual(){
     numCta:    document.getElementById('adm-num-cuenta')?.value   || '20512051969',
     titular:   document.getElementById('adm-titular')?.value      || 'Octavio Méndez',
     nit:       document.getElementById('adm-nit')?.value          || '830505487',
-    claveHash: ADMIN_PASS_HASH_ACTUAL,
   };
 }
 
@@ -6722,9 +6458,6 @@ function aplicarCambiosAlHTML(html, c){
   html = html.replace(/(gn\('c-meses'\)\s*\|\|\s*)\d+/,  `$1${c.meses}`);
   html = html.replace(/(gn\('c-peso'\)\s*\|\|\s*)\d+/,   `$1${c.peso}`);
   html = html.replace(/(gn\('c-perd'\)\s*\|\|\s*)\d+/,   `$1${c.perd}`);
-
-  // ── Clave admin ──
-  html = html.replace(/(const ADMIN_PASS_HASH_DEFAULT = ')[^']*(')/, `$1${c.claveHash}$2`);
 
   // ── Datos de contacto — reemplazos globales ──
   // Detectar valores originales leyendo el HTML fuente
@@ -7032,7 +6765,7 @@ function renderPlanilla(){
       <td style="padding:10px 8px;color:rgba(255,255,255,.4);font-size:.75rem;">
         <div style="display:flex;align-items:center;gap:5px;">
           <span>${emlSeg}</span>
-          <button onclick="editarEmailAdoptante('${nomSeg}')" title="Editar email"
+          <button onclick="editarEmailAdoptante(${jsStr(a.nom)})" title="Editar email"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:20px;height:20px;border-radius:5px;cursor:pointer;font-size:.62rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✏️</button>
         </div>
@@ -7040,7 +6773,7 @@ function renderPlanilla(){
       <td style="padding:10px 8px;color:rgba(255,255,255,.55);font-size:.73rem;">
         <div style="display:flex;align-items:center;gap:5px;">
           <span style="font-family:'Space Mono',monospace;">${ccSeg||'—'}</span>
-          <button onclick="editarCedulaAdoptante('${nomSeg}')" title="Editar cédula"
+          <button onclick="editarCedulaAdoptante(${jsStr(a.nom)})" title="Editar cédula"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:20px;height:20px;border-radius:5px;cursor:pointer;font-size:.62rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✏️</button>
         </div>
@@ -7055,28 +6788,28 @@ function renderPlanilla(){
       <td style="padding:10px 8px;text-align:center;">
         <div style="display:flex;align-items:center;justify-content:center;gap:5px;">
           <span id="pin-mask-${idSeg}" style="font-family:'Space Mono',monospace;color:rgba(255,255,255,.35);font-size:.75rem;letter-spacing:.1em;">••••</span>
-          <button onclick="verClavePlanilla('${nomSeg}')" title="Ver clave"
+          <button onclick="verClavePlanilla(${jsStr(a.nom)})" title="Ver clave"
             style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);
             width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:.68rem;display:flex;align-items:center;justify-content:center;">👁️</button>
-          <button onclick="restablecerClaveAdoptante('${nomSeg}')" title="Restablecer clave (olvidó su acceso)"
+          <button onclick="restablecerClaveAdoptante(${jsStr(a.nom)})" title="Restablecer clave (olvidó su acceso)"
             style="background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.28);color:#d4a843;
             width:22px;height:22px;border-radius:5px;cursor:pointer;font-size:.68rem;display:flex;align-items:center;justify-content:center;">🔄</button>
         </div>
       </td>
       <td style="padding:10px 8px;text-align:center;display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
         ${a.est==='verif' ? `
-        <button onclick="verificarPagoManual('${nomSeg}')" title="Ya confirmé el dinero en mi cuenta"
+        <button onclick="verificarPagoManual(${jsStr(a.nom)})" title="Ya confirmé el dinero en mi cuenta"
           style="background:rgba(82,183,136,.18);border:1px solid rgba(82,183,136,.45);
           color:#52b788;padding:3px 8px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;">✅ Verificar</button>
-        <button onclick="rechazarPagoManual('${nomSeg}')" title="El dinero no llegó"
+        <button onclick="rechazarPagoManual(${jsStr(a.nom)})" title="El dinero no llegó"
           style="background:rgba(224,112,112,.1);border:1px solid rgba(224,112,112,.3);
           color:#e07070;padding:3px 8px;border-radius:6px;font-size:.65rem;cursor:pointer;">❌ No llegó</button>` : ''}
-        <button onclick="cambiarEstado('${nomSeg}')"
+        <button onclick="cambiarEstado(${jsStr(a.nom)})"
           style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
           color:rgba(255,255,255,.5);padding:3px 10px;border-radius:6px;font-size:.65rem;cursor:pointer;">
           Editar
         </button>
-        <button onclick="borrarAdoptante('${nomSeg}','${txSeg}')"
+        <button onclick="borrarAdoptante(${jsStr(a.nom)},${jsStr(a.txId)})"
           style="background:rgba(224,112,112,.1);border:1px solid rgba(224,112,112,.25);
           color:#e07070;padding:3px 8px;border-radius:6px;font-size:.65rem;cursor:pointer;"
           title="Eliminar adoptante de prueba">
@@ -7139,7 +6872,7 @@ function restablecerClaveAdoptante(nom){
       <div style="font-size:.68rem;color:rgba(255,255,255,.35);margin-bottom:16px;">
         Sugerencia precargada: últimos 4 dígitos de su cédula. Puedes cambiarla por cualquier otra de 4 dígitos.
       </div>
-      <button onclick="confirmarResetPin('${nomSegR}')"
+      <button onclick="confirmarResetPin(${jsStr(a.nom)})"
         style="width:100%;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;border-radius:9px;
         padding:12px;color:#1a3a2a;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Confirmar nueva clave
@@ -7212,7 +6945,7 @@ function editarCedulaAdoptante(nom){
         <input type="checkbox" id="sync-pin-cc" checked style="accent-color:#52b788;">
         Actualizar también la clave de acceso (últimos 4 dígitos de la nueva cédula)
       </label>
-      <button onclick="confirmarEdicionCC('${nomSegR}')"
+      <button onclick="confirmarEdicionCC(${jsStr(a.nom)})"
         style="width:100%;background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:9px;
         padding:12px;color:white;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Guardar cédula
@@ -7288,7 +7021,7 @@ function editarEmailAdoptante(nom){
         ⚠️ El adoptante usa este email para entrar a su Panel personal (Dashboard propio).
         Si lo cambias, deberá usar el nuevo correo la próxima vez que inicie sesión.
       </div>
-      <button onclick="confirmarEdicionEmail('${nomSegR}')"
+      <button onclick="confirmarEdicionEmail(${jsStr(a.nom)})"
         style="width:100%;background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:9px;
         padding:12px;color:white;font-weight:700;font-size:.86rem;cursor:pointer;">
         ✅ Guardar email
@@ -7348,11 +7081,11 @@ function borrarAdoptante(nom, txId){
       <div style="font-size:2rem;text-align:center;margin-bottom:12px;">🗑️</div>
       <h3 style="color:#e07070;font-family:'Playfair Display',serif;text-align:center;margin-bottom:10px;">Eliminar Adoptante</h3>
       <p style="color:rgba(255,255,255,.6);font-size:.82rem;text-align:center;line-height:1.6;margin-bottom:18px;">
-        ¿Eliminar a <strong style="color:#f8f4e8;">${nom}</strong> de la planilla?<br>
+        ¿Eliminar a <strong style="color:#f8f4e8;">${escapeHtml(nom)}</strong> de la planilla?<br>
         <span style="color:rgba(224,112,112,.7);font-size:.75rem;">Esta acción no se puede deshacer. Usar solo para registros de prueba.</span>
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <button onclick="confirmarBorrarAdoptante('${nom}','${txId}')"
+        <button onclick="confirmarBorrarAdoptante(${jsStr(nom)},${jsStr(txId)})"
           style="background:linear-gradient(135deg,#8b1a1a,#e07070);border:none;border-radius:9px;
           padding:11px;color:white;font-weight:700;font-size:.82rem;cursor:pointer;">
           ✅ Sí, eliminar
@@ -7625,7 +7358,7 @@ function importarRespaldoJSON(event){
           ⚠️ Esto <strong>reemplazará</strong> todos los adoptantes, pagos y guardianes actuales de este navegador por los del respaldo. Esta acción no se puede deshacer.
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <button onclick='confirmarImportarJSON(${JSON.stringify(JSON.stringify(datos))})'
+          <button onclick="confirmarImportarJSON(${escapeHtml(JSON.stringify(JSON.stringify(datos)))})"
             style="background:linear-gradient(135deg,#2d6a4f,#52b788);border:none;border-radius:9px;
             padding:12px;color:white;font-weight:700;font-size:.84rem;cursor:pointer;">
             ✅ Sí, importar y reemplazar
@@ -7691,7 +7424,7 @@ async function actualizarHuellaVerificacion(){
   const hEl = document.getElementById('verif-pwd-hash');
   if(vEl) vEl.textContent = APP_VERSION_NUM;
   if(bEl) bEl.textContent = BUILD_ID;
-  if(hEl) hEl.textContent = (ADMIN_PASS_HASH_ACTUAL||'').slice(0,8) || '—';
+  if(hEl) hEl.textContent = 'en el servidor (ya no hay clave en este archivo)';
 }
 
 function exportarCSV(){
@@ -8184,7 +7917,7 @@ function renderPanelAdoptante(a){
           ${fmt(proxima.saldo)}
         </div>
       </div>
-      <button onclick="abrirModalPagarCuota('${escapeHtml(a.nom)}')"
+      <button onclick="abrirModalPagarCuota(${jsStr(a.nom)})"
         style="width:100%;background:linear-gradient(135deg,#d4a843,#f0c674);border:none;
         border-radius:9px;padding:12px;color:#1a3a2a;font-weight:700;font-size:.88rem;
         cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .2s;"
@@ -8252,12 +7985,12 @@ function renderPanelAdoptante(a){
         style="background:rgba(149,213,178,.06);border:1px solid rgba(149,213,178,.18);
         border-radius:10px;padding:10px;color:#95d5b2;font-size:.72rem;font-weight:700;
         cursor:pointer;font-family:'DM Sans',sans-serif;">📸 Ver Fotos</button>
-      <button onclick="closeMod('mod-panel-adoptante');abrirCertificadoAdoptante('${escapeHtml(a.gdn)}')"
+      <button onclick="closeMod('mod-panel-adoptante');abrirCertificadoAdoptante(${jsStr(a.gdn)})"
         style="background:rgba(212,168,67,.06);border:1px solid rgba(212,168,67,.2);
         border-radius:10px;padding:10px;color:#d4a843;font-size:.72rem;font-weight:700;
         cursor:pointer;font-family:'DM Sans',sans-serif;">📜 Certificado</button>
     </div>
-    <button onclick="adoptarOtroGuardian('${escapeHtml(a.nom)}')"
+    <button onclick="adoptarOtroGuardian(${jsStr(a.nom)})"
       style="width:100%;background:rgba(82,183,136,.1);border:1px dashed rgba(82,183,136,.45);
       border-radius:10px;padding:10px;color:#95d5b2;font-size:.76rem;font-weight:700;margin-top:4px;
       cursor:pointer;font-family:'DM Sans',sans-serif;">🐷➕ Adoptar otro guardián con mis datos</button>
@@ -8698,8 +8431,8 @@ function verLiquidacionDigital(){
         </div>
         <div style="background:rgba(255,255,255,.03);border:1px solid rgba(149,213,178,.12);border-radius:10px;padding:14px;margin-bottom:14px;font-size:.76rem;">
           <div style="color:rgba(149,213,178,.55);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Reserva Natural La Escondida · NIT 830505487</div>
-          <div style="color:rgba(255,255,255,.5);margin-bottom:3px;">Adoptante: <strong style="color:#f8f4e8;">${nom}</strong></div>
-          <div style="color:rgba(255,255,255,.5);margin-bottom:3px;">Guardián: <strong style="color:#95d5b2;">${gdn.nom} (${gdn.id})</strong></div>
+          <div style="color:rgba(255,255,255,.5);margin-bottom:3px;">Adoptante: <strong style="color:#f8f4e8;">${escapeHtml(nom)}</strong></div>
+          <div style="color:rgba(255,255,255,.5);margin-bottom:3px;">Guardián: <strong style="color:#95d5b2;">${escapeHtml(gdn.nom)} (${escapeHtml(gdn.id)})</strong></div>
           <div style="color:rgba(255,255,255,.5);">Fecha: <strong style="color:#f8f4e8;">${hoy}</strong></div>
         </div>
         ${rowsHTML}

@@ -1,4 +1,4 @@
-// netlify/functions/registrar-intencion.js  (v57, v58: pago de cuotas desde el portal)
+// netlify/functions/registrar-intencion.js  (v57, v58: pago de cuotas desde el portal, v61: limpieza de texto)
 //
 // Primer paso de TODO pago real (Wompi, Nequi, PSE, PayPal, Efectivo).
 // El navegador del adoptante llama aquí ANTES de pagar. Esta función:
@@ -13,6 +13,12 @@
 //   5. Nequi / PSE / PayPal / Efectivo: reserva el guardián y deja al
 //      adoptante "Por verificar" hasta que el administrador confirme el dinero.
 //
+// v61 — LIMPIEZA DE TEXTO: nombre, ciudad, comprobante, etc. los escribe cualquier
+// visitante y luego los ve el administrador en su panel. Aquí se eliminan los
+// caracteres que sirven para inyectar código (< > " ` \ { } $ ; = | ^ ~) y los de
+// control; la comilla simple ' se cambia por ’ (así "D'Angelo" se conserva).
+// El panel además escapa todo al mostrarlo (doble protección).
+//
 // Variables de entorno (ya existentes): SUPABASE_SERVICE_ROLE_KEY,
 // WOMPI_INTEGRITY_SECRET.
 
@@ -22,6 +28,17 @@ const F = require('../lib/finanzas');
 const METODOS = { wom: 'Wompi', neq: 'Nequi', pse: 'PSE / Transferencia', pal: 'PayPal', efe: 'Efectivo' };
 const resp = (code, obj) => ({ statusCode: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(obj) });
 const txt = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+// v61: texto libre seguro para mostrarse en el panel del administrador
+const limpio = (v, max) => String(v == null ? '' : v)
+  .normalize('NFC')
+  .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+  .replace(/[<>"`\\{}$;=|^~]/g, '')
+  .replace(/'/g, '\u2019')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, max);
+const telLimpio = (v, max) => String(v == null ? '' : v).replace(/[^\d\s+().-]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+const EMAIL_OK = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return resp(405, { error: 'Método no permitido.' });
@@ -33,9 +50,9 @@ exports.handler = async (event) => {
   const metodo = txt(b.metodo, 3);
   let cc = txt(b.cc, 20).replace(/\D/g, '');
   const gid = txt(b.guardian_id, 12).toUpperCase();
-  const gnom = txt(b.guardian_nombre, 60);
+  const gnom = limpio(b.guardian_nombre, 60);
   const mes = parseInt(b.mes, 10);
-  const comprobante = txt(b.comprobante, 200);
+  const comprobante = limpio(b.comprobante, 200);
 
   if (!/^[A-Za-z0-9_-]{6,64}$/.test(reference)) return resp(400, { error: 'Referencia inválida.' });
 
@@ -43,19 +60,19 @@ exports.handler = async (event) => {
   // identifica con correo + clave y el servidor pone su cédula (el navegador no la tiene).
   // v60: también sirve para adoptar OTRO guardián con los datos ya guardados:
   // el servidor toma cédula, nombre, correo, teléfono y ciudad de la cuenta.
-  let nom = txt(b.nom, 120), email = txt(b.email, 160).toLowerCase(), tel = txt(b.tel, 40), ciu = txt(b.ciu, 120);
+  let nom = limpio(b.nom, 120), email = txt(b.email, 160).toLowerCase(), tel = telLimpio(b.tel, 40), ciu = limpio(b.ciu, 120);
   if (b.portal_email && b.portal_pin) {
     try {
       const a = await F.verificarAccesoPortal(b.portal_email, b.portal_pin);
-      cc = String(a.cc); nom = txt(a.nom, 120) || nom; email = txt(a.email, 160).toLowerCase() || email;
-      tel = txt(a.tel, 40) || tel; ciu = txt(a.ciu, 120) || ciu;
+      cc = String(a.cc); nom = limpio(a.nom, 120) || nom; email = txt(a.email, 160).toLowerCase() || email;
+      tel = telLimpio(a.tel, 40) || tel; ciu = limpio(a.ciu, 120) || ciu;
     }
     catch (e) { return resp(e.status && e.status < 500 ? e.status : 500, { error: e.message || 'No pudimos verificar tu acceso.' }); }
   }
   if (!METODOS[metodo]) return resp(400, { error: 'Método de pago inválido.' });
   if (!/^\d{6,12}$/.test(cc)) return resp(400, { error: 'La cédula debe tener entre 6 y 12 dígitos.' });
-  if (nom.length < 3) return resp(400, { error: 'Escribe tu nombre completo.' });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return resp(400, { error: 'Correo inválido.' });
+  if (nom.length < 3) return resp(400, { error: 'Escribe tu nombre completo (solo letras, números y signos básicos).' });
+  if (email && !EMAIL_OK.test(email)) return resp(400, { error: 'Correo inválido.' });
   if (!/^G-\d{3}$/.test(gid)) return resp(400, { error: 'Guardián inválido.' });
 
   try {

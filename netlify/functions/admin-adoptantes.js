@@ -1,55 +1,45 @@
-// netlify/functions/admin-adoptantes.js  (v60: varias adopciones por persona)
+// netlify/functions/admin-adoptantes.js  (v61: acceso con sesión + confirmación con código)
 //
 // Función protegida para administrar la planilla de Adoptantes y la
 // configuración del sitio en Supabase — el único camino que puede LEER la
 // planilla completa (con cédula/email/teléfono de cada adoptante), BORRAR
 // una fila, o ESCRIBIR la configuración (precios, cuenta bancaria).
 //
+// v61 — CÓMO SE PROTEGE AHORA (reemplaza la clave enviada en cada petición):
+//   1. Para entrar, el administrador pasa por netlify/functions/admin-login.js
+//      (clave + código de la app autenticadora + captcha opcional). Si todo es
+//      correcto, el navegador recibe una cookie de sesión HttpOnly firmada.
+//      El JavaScript de la página no puede leerla.
+//   2. Esta función ya NO recibe la clave: solo acepta esa cookie.
+//   3. Las acciones delicadas (cambiar la cuenta bancaria o precios, borrar
+//      adoptantes, cambiar cédulas, confirmar pagos, importar datos) exigen
+//      además haber confirmado con un código de la app en los últimos 5 minutos.
+//      Si no, responde 403 {codigo:'stepup'} y el panel pide el código.
+//
+// Variables de entorno: SUPABASE_SERVICE_ROLE_KEY y las de admin-login.js
+// (ADMIN_PASS_PBKDF2, ADMIN_TOTP_SECRET, ADMIN_SESSION_SECRET).
+//
 // POR QUÉ ESTA FUNCIÓN EXISTE (contexto de seguridad):
 // La tabla `adoptantes` en Supabase SÍ contiene datos personales reales
-// (cédula, email, teléfono, ciudad). A diferencia de `guardianes` (que no
-// tiene datos personales y por eso puede tener lectura pública), la
-// planilla de Adoptantes NO puede ser de lectura pública con la anon key:
-// esa key está embebida en el código fuente público del sitio (en GitHub),
-// así que "lectura pública" equivaldría a publicar la cédula y el teléfono
-// de cada adoptante para cualquiera que la busque.
-//
-// Por eso, leer la planilla completa y borrar una fila requieren la
-// contraseña REAL de administrador, verificada aquí en el servidor (nunca
-// solo en el navegador) contra un hash guardado como variable de entorno de
-// Netlify — no contra el hash que viene embebido en el HTML, porque ese
-// también es público. Si un atacante solo tiene acceso al código fuente del
-// sitio, no puede obtener ni la contraseña ni los datos de los adoptantes.
-//
-// (Guardar/actualizar una fila SIGUE siendo público con la anon key, igual
-// que `guardianes` — lo necesita el navegador del adoptante justo después
-// de pagar, antes de haber iniciado sesión como nada. Ver
-// GUIA_SEGURIDAD_SUPABASE_v2.sql para las políticas RLS con CHECK que
-// acotan esa escritura pública.)
-//
-// Configuración requerida en Netlify (variables de entorno):
-//   ADMIN_PASS_HASH             → el mismo hash SHA-256 que usa el panel
-//                                  admin para verificar la contraseña
-//                                  (Admin → Config → 🔑 Seguridad de acceso
-//                                  muestra los primeros caracteres del hash
-//                                  actual). IMPORTANTE: si cambias la
-//                                  contraseña de administrador desde el
-//                                  panel, debes actualizar también esta
-//                                  variable en Netlify con el nuevo hash —
-//                                  si no lo haces, esta función seguirá
-//                                  aceptando la contraseña VIEJA.
-//   SUPABASE_SERVICE_ROLE_KEY   → la misma que ya configuraste para
-//                                  wompi-webhook.js (Supabase → Project
-//                                  Settings → API → "service_role" secret).
+// (cédula, email, teléfono, ciudad). La planilla NO puede ser de lectura
+// pública con la anon key (está embebida en el código público del sitio).
 
 const crypto = require('crypto');
 const F = require('../lib/finanzas'); // v57: cuotas, contabilidad e intenciones de pago
+const S = require('../lib/admin-sesion'); // v61: sesión, código de la app
 
 const SUPABASE_URL = process.env.SUPABASE_URL_OVERRIDE || 'https://rbryttidysmkkjmmsezj.supabase.co';
 
-function sha256Hex(texto){
-  return crypto.createHash('sha256').update(texto, 'utf8').digest('hex');
-}
+// Acciones que exigen haber confirmado con un código de la app hace menos de 5 minutos
+const ACCIONES_DELICADAS = new Set([
+  'guardar_config',      // precios y cuenta bancaria que ven los adoptantes
+  'borrar_adoptante',
+  'cambiar_cc',
+  'guardar_guardian',
+  'importar_finanzas',
+  'verificar_intencion', // dar por recibido un pago
+  'registrar_pago',
+]);
 
 async function supabaseFetch(path, opciones){
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -67,25 +57,40 @@ async function supabaseFetch(path, opciones){
 }
 
 exports.handler = async (event) => {
+  const NOCACHE = { 'Cache-Control': 'no-store' };
+  const fin = (r, cookie) => ({ ...r, headers: { ...NOCACHE, ...(r.headers || {}), ...(cookie ? { 'Set-Cookie': cookie } : {}) } });
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Método no permitido.' }) };
+    return fin({ statusCode: 405, body: JSON.stringify({ error: 'Método no permitido.' }) });
+  }
+  if (!S.origenValido(event)) {
+    return fin({ statusCode: 403, body: JSON.stringify({ error: 'Origen no permitido.' }) });
   }
 
   let body;
   try { body = JSON.parse(event.body || '{}'); }
-  catch (e) { return { statusCode: 400, body: JSON.stringify({ error: 'JSON inválido.' }) }; }
+  catch (e) { return fin({ statusCode: 400, body: JSON.stringify({ error: 'JSON inválido.' }) }); }
 
-  const { clave, accion } = body;
+  const { accion } = body;
 
-  const hashEsperado = process.env.ADMIN_PASS_HASH;
-  if (!hashEsperado) {
-    console.error('ADMIN_PASS_HASH no está configurado en las variables de entorno de Netlify.');
-    return { statusCode: 500, body: JSON.stringify({ error: 'Configuración de servidor incompleta.' }) };
+  // ── v61: sesión de administrador (cookie HttpOnly firmada) ──
+  const sesion = S.leerSesion(event);
+  if (!sesion) {
+    return fin({ statusCode: 401, body: JSON.stringify({ error: 'Tu sesión de administrador venció. Entra de nuevo.', codigo: 'sesion' }) });
   }
-  if (!clave || sha256Hex(String(clave)) !== hashEsperado) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Contraseña de administrador incorrecta.' }) };
+  if (ACCIONES_DELICADAS.has(accion) && !S.confirmacionVigente(sesion)) {
+    return fin({ statusCode: 403, body: JSON.stringify({ error: 'Confirma con el código de tu app para hacer este cambio.', codigo: 'stepup' }) });
   }
 
+  const res = await manejar(accion, body);
+  if (ACCIONES_DELICADAS.has(accion) && res.statusCode >= 200 && res.statusCode < 300) {
+    await S.registrar(S.ipDe(event), 'accion', accion);
+  }
+  // La sesión se renueva con cada uso (30 min de inactividad)
+  return fin(res, S.cookieSesion(S.nuevaSesion(sesion, false)));
+};
+
+async function manejar(accion, body) {
   const ok = (obj) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, ...(obj || {}) }) });
   const mal = (code, msg) => ({ statusCode: code, body: JSON.stringify({ error: msg }) });
   const ccValida = (v) => /^\d{4,20}$/.test(String(v || ''));
@@ -348,4 +353,4 @@ exports.handler = async (event) => {
     console.error('Error inesperado en admin-adoptantes:', e);
     return { statusCode: 500, body: JSON.stringify({ error: 'Error interno del servidor.' }) };
   }
-};
+}
